@@ -27,6 +27,9 @@ class TextLayer extends AbstractLayer
     private LineBreakerInterface $lineBreaker;
     private TextMeasurerFactoryInterface $measurerFactory;
 
+    /** Resolver 物化后的本地字体路径，渲染端优先使用 */
+    private ?string $resolvedFont = null;
+
     // 取值：left,center,right
     protected string $horizontalAlign = 'left';
     // 取值：top,center,bottom
@@ -95,6 +98,7 @@ class TextLayer extends AbstractLayer
         $this->font = $font;
         $this->fontSize = $fontSize;
         $this->fontColor = $fontColor;
+        $this->resolvedFont = null;
 
         return $this;
     }
@@ -102,6 +106,22 @@ class TextLayer extends AbstractLayer
     public function getFont(): string
     {
         return $this->font;
+    }
+
+    /**
+     * @internal 仅供 ResourceResolver 回写物化结果
+     */
+    public function setResolvedFont(string $path): static
+    {
+        $this->resolvedFont = $path;
+
+        return $this;
+    }
+
+    /** 渲染实际使用的字体文件：优先物化结果；空串/纯数字表示渲染端内置默认字体 */
+    public function getResolvedFont(): string
+    {
+        return $this->resolvedFont ?? $this->font;
     }
 
     public function getFontSize(): int

@@ -331,11 +331,21 @@ abstract class AbstractLayer
         return $this;
     }
 
+    public function getHorizontalAlign(): string
+    {
+        return $this->horizontalAlign;
+    }
+
     public function setVerticalAlign(string $vertical): static
     {
         $this->verticalAlign = $vertical;
 
         return $this;
+    }
+
+    public function getVerticalAlign(): string
+    {
+        return $this->verticalAlign;
     }
 
     public function setPriority(int $priority): static
