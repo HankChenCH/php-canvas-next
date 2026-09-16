@@ -1,5 +1,6 @@
 {
     "name": "hankchen/php-canvas-next",
+    "version": "1.0.0",
     "description": "next generation of php-canvas: layer tree (pure structure) + pluggable renderers (image now, pdf later)",
     "type": "library",
     "license": "MIT",
@@ -25,10 +26,15 @@
     ],
     "require": {
         "php": "^8.3",
-        "endroid/qr-code": "^6.0",
-        "intervention/image": "^4.0"
+        "endroid/qr-code": "^6.0"
+    },
+    "suggest": {
+        "hankchen/php-canvas-image-renderer": "位图渲染后端（intervention/image v4），输出 ImageInterface",
+        "ext-intl": "可选：图素簇（grapheme）精确切分，缺失时降级为码点切分"
     },
     "require-dev": {
         "phpunit/phpunit": "^9.6"
+    },
+    "repositories": {
     }
 }

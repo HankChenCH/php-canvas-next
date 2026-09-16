@@ -39,7 +39,8 @@ class ResourceResolverTest extends CanvasTestCase
 
     public function testRemoteImageDownloadedOnceAndCachedAcrossLayers(): void
     {
-        $resolver = $this->resolverWith($this->pngBytes(2, 2, '#f00'));
+        // Resolver 只负责把字节落盘，不校验图片内容，哑字节即可
+        $resolver = $this->resolverWith('fake-image-bytes');
         $url = 'https://cdn.example.com/img/red.png';
 
         $canvas = Canvas::make(10, 10,

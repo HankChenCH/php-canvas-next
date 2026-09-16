@@ -4,20 +4,23 @@
 
 - `Canvas` / `Layer` 是纯数据容器，只承载设定与纯布局函数，不含任何渲染状态；
 - 渲染由 Renderer 驱动：`Renderer::render(Canvas)` 主动拉取结构树，按图层类型分派绘制；
-- 内置 `ImageRenderer`（intervention/image v4），PDF 等其他后端实现同一契约即可接入。
+- 本包只含结构、渲染契约与资源物化，位图后端在伴随包
+  [hankchen/php-canvas-image-renderer](https://github.com/hankchen/php-canvas-image-renderer)。
 
 设计文档与对象交互图见 [docs/design/layer-renderer-separation.md](docs/design/layer-renderer-separation.md)。
 
 ## 环境要求
 
-- PHP `^8.3`
-- GD 或 Imagick 扩展（Imagick 优先）
-- 文字渲染建议提供真实 TTF/TTC 字体文件（Imagick 驱动无内置字体，必须提供）
+- PHP `^8.3`、`endroid/qr-code` `^6.0`
+- `ext-intl` 可选（图素簇精确切分，缺失时降级码点切分）
+- 本包**不依赖任何图像扩展**；GD/Imagick 由图像渲染后端包引入
 
 ## 安装
 
 ```sh
 composer require hankchen/php-canvas-next
+# 位图输出（intervention/image v4）：
+composer require hankchen/php-canvas-image-renderer
 ```
 
 ## 快速上手
@@ -26,7 +29,7 @@ composer require hankchen/php-canvas-next
 use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\TextLayer;
-use HankChen\CanvasNext\Renderer\Image\ImageRenderer;
+use HankChen\CanvasNext\Renderer\Image\ImageRenderer; // 来自 php-canvas-image-renderer 包
 
 $canvas = Canvas::make(400, 300,
     // priority 越大越先渲染（越垫底），与 php-canvas 一致
@@ -38,30 +41,26 @@ $canvas = Canvas::make(400, 300,
         ->setPriority(1)
 );
 
-$image = (new ImageRenderer())->render($canvas); // 返回 intervention/image v4 ImageInterface
+$image = (new ImageRenderer())->render($canvas); // intervention/image v4 ImageInterface
 $image->save('/tmp/out.png');
 ```
 
-单图层渲染：
-
-```php
-$image = (new ImageRenderer())->renderLayer($layer);
-```
+单图层渲染：`(new ImageRenderer())->renderLayer($layer)`。
 
 ## 核心概念
 
 ### 结构与渲染分离
 
 ```
-Canvas / Layer（纯数据，设定 + 纯布局函数）
+Canvas / Layer（纯数据，设定 + 纯布局函数）         ← 本包
         ↓  Renderer::render(Canvas) 主动拉取
-AbstractRenderer（模板方法：资源物化 → 建渲染面 → 遍历分派 → 容器下钻 → 收尾）
+AbstractRenderer（模板方法：资源物化 → 建渲染面 → 遍历分派 → 容器下钻 → 收尾）   ← 本包
         ↓  绘制原语 drawRect / drawImage / drawText
-ImageRenderer（intervention/image）  …  PdfRenderer（规划中）
+ImageRenderer（intervention/image，独立包）  …  PdfRenderer（规划中）
 ```
 
 - 图层 setter 不产生任何 I/O；远程图片/字体与二维码的下载、生成由
-  `ResourceResolver` 在渲染前统一物化，渲染端只见本地路径；
+  `ResourceResolver`（本包）在渲染前统一物化，渲染端只见本地路径；
 - 容器图层（`TableLayer → TableRowLayer → TableCellLayer`）在 `addRow/addCell/addContentLayer`
   时同步父子尺寸（结构侧契约）；
 - 布局计算（断行、autoHeight、对齐原点）是图层上的纯函数，所有渲染端共享同一结果。
@@ -80,7 +79,7 @@ $layer->setMeasurerFactory($myFactory);        // HankChen\CanvasNext\Contracts\
 自定义远程资源下载器（代理、鉴权等）：
 
 ```php
-$renderer = new ImageRenderer(new ResourceResolver($myDownloader)); // DownloaderInterface
+$renderer = new ImageRenderer(new \HankChen\CanvasNext\ResourceManagers\ResourceResolver($downloader));
 ```
 
 ### 结构树序列化
@@ -113,8 +112,7 @@ $canvas = Canvas::fromGraph($spec);             // 完整重建（含表格尺�
 
 ```sh
 composer install
-composer test            # PHPUnit
-php scripts/visual-check.php [out.png]   # 渲染目验样图
+composer test
 ```
 
-测试说明见 [AGENTS.md](AGENTS.md)。
+渲染目验样图脚本位于 image-renderer 包：`php scripts/visual-check.php`。测试约定见 [AGENTS.md](AGENTS.md)。
