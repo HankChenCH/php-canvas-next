@@ -3,3 +3,5 @@ composer.lock
 coverage.xml
 .phpunit.result.cache
 .DS_Store
+
+/visual-check.png
