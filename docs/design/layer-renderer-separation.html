@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>php-canvas：Layer / Renderer 分离 — 对象交互设计（待确认 · Renderer 驱动版）</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; max-width: 1150px; margin: 24px auto 64px; padding: 0 16px; color: #1f2328; }
+  h1 { font-size: 21px; }
+  h2 { font-size: 16px; margin-top: 40px; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+  .note { background: #fffbe6; border: 1px solid #ffe58f; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  pre.mermaid { background: #fafafa; border: 1px solid #e8e8e8; padding: 14px; border-radius: 8px; overflow-x: auto; }
+  table { border-collapse: collapse; font-size: 13px; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  th { background: #f6f8fa; }
+</style>
+</head>
+<body>
+
+<h1>php-canvas：Layer 与 Renderer 分离 — 对象交互设计（待确认 · Renderer 驱动版）</h1>
+<p class="note">
+  目标架构：<b>Renderer::render(Canvas)，Renderer 是主动方</b>：由 Renderer 向 Canvas 拉取尺寸与有序图层，
+  按图层类型分派，读取 Layer 的"设定 + 纯布局函数"完成渲染。Canvas 是纯数据容器，只有访问器，不依赖任何 Renderer。
+</p>
+
+<h2>一、渲染主流程（对象交互时序）</h2>
+<script type="text/plain" class="mermaid-src">
+sequenceDiagram
+    autonumber
+    participant C as Client（调用方）
+    participant RD as Renderer<br/>（主动方 / 驱动者）
+    participant CV as Canvas<br/>（纯数据容器）
+    participant L as Layer 树<br/>（设定 + 纯布局函数）
+    participant RS as ResourceResolver<br/>（资源物化）
+
+    Note over C,L: ① 结构构建阶段 —— 不涉及任何渲染
+    C->>CV: Canvas::make(w, h) / addLayer($layer)
+    Note over CV: 按 priority 排序，存为普通有序数组<br/>（替换 SplPriorityQueue，修复不可重复遍历）
+    C->>L: addRow() / addCell() / addContentLayer()
+    Note over L: 建树时同步父子尺寸<br/>（结构侧契约，保留）
+
+    Note over C,L: ② 渲染阶段 —— Renderer 是主动方，Canvas 全程被动
+    C->>RD: (new ImageRenderer())->render($canvas)
+    RD->>CV: getWidth() / getHeight()
+    RD->>RS: resolve($canvas)
+    RS->>L: 读原始引用（图片 URL / 字体 URL / qrText）
+    RS->>RS: 下载远程资源入缓存；QR 码生成 PNG
+    RS-->>L: 回写本地物化路径
+    RD->>CV: getLayers()（按 priority 排序返回）
+    RD->>RD: begin：创建渲染面（位图 / PDF 文档）
+    loop 每个 Layer
+        RD->>RD: instanceof 分派 → drawImage / drawText / drawQrCode / ...
+        RD->>L: 读设定 + 纯布局函数<br/>getWidth() / getHeight() / getPosition() / autowrap()
+        RD->>L: 容器层取子结构<br/>getRows() / getCells() / getContentLayer()
+        RD->>RD: 坐标偏移栈下钻 table→row→cell<br/>在同一渲染面上直画
+    end
+    RD->>RD: end：收尾并输出产物
+    RD-->>C: ImageInterface ｜ PDF bytes
+    Note over C,RD: PdfRenderer 走完全相同的 8–18 步，共享同一套布局计算 → 排版结果一致<br/>PDF 后端可自主扩展遍历策略（如分页）
+</script>
+
+<h2>二、静态类关系</h2>
+<script type="text/plain" class="mermaid-src">
+classDiagram
+    class Canvas {
+        -layers 有序图层表
+        +addLayer(layer)
+        +getWidth() / +getHeight()
+        +getLayers() AbstractLayer数组
+        +graph() array
+        +fromGraph(spec) Canvas
+    }
+    class AbstractLayer {
+        <<abstract>>
+        设定：width / height / padding / border / align / position
+        纯布局：getWidth / getHeight / getPosition / autowrap
+        子结构访问器：getRows / getCells / getContentLayer
+        无 render()，无图像库依赖
+    }
+    class RendererInterface {
+        <<interface>>
+        +render(Canvas) mixed
+    }
+    class AbstractRenderer {
+        <<abstract>>
+        render() 为模板方法：resolve→begin→walk→end
+        遍历 / priority 排序消费 / 偏移栈 / 锚点解析
+        instanceof 分派到 protected 绘制原语
+    }
+    class ImageRenderer {
+        intervention/image v4 后端
+        实现 drawImage / drawText / drawQrCode / drawRect
+        输出 ImageInterface
+    }
+    class PdfRenderer {
+        tFPDF / TCPDF 后端（需 CJK 支持）
+        接口单位为抽象像素，内部 px→pt
+        输出 PDF bytes
+    }
+    class ResourceResolver {
+        +resolve(canvas)
+        下载图片/字体入缓存，生成 QR PNG
+    }
+
+    Canvas o-- AbstractLayer : 持有序列
+    AbstractLayer <|-- ImageLayer
+    AbstractLayer <|-- TextLayer
+    AbstractLayer <|-- QrCodeLayer
+    AbstractLayer <|-- TableLayer
+    TableLayer o-- TableRowLayer : rows
+    TableRowLayer o-- TableCellLayer : cells
+    TableCellLayer o-- AbstractLayer : content
+    RendererInterface <|.. AbstractRenderer
+    AbstractRenderer <|-- ImageRenderer
+    AbstractRenderer <|-- PdfRenderer
+    AbstractRenderer ..> Canvas : render(Canvas) 拉取
+    AbstractRenderer ..> ResourceResolver : 渲染前物化资源
+    ResourceResolver ..> Canvas : 读写 Layer 资源引用
+    Canvas ..> AbstractLayer : 纯结构依赖
+</script>
+<p class="note">
+  要点：<b>公开接口只有一个方法 render(Canvas): mixed</b>；遍历/分派/偏移栈等通用逻辑收在 AbstractRenderer 模板方法里，
+  两个后端只实现 draw* 绘制原语，互不重复。特殊后端（如需自定义遍历/分页）可直接实现 RendererInterface 绕过基类。
+  Layer 与 Canvas 均不感知 Renderer，依赖方向永远是 Renderer → Canvas → Layer。
+</p>
+
+<h2>三、结构持久化 graph() / fromGraph()</h2>
+<script type="text/plain" class="mermaid-src">
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant CV as Canvas
+    participant L as Layer 树
+    Note over C,L: graph() 修为无损输出，新增 fromGraph() 反序列化，<br/>结构树成为可持久化、可跨渲染端复用的格式
+    C->>CV: graph()
+    CV->>L: graph()（type / spec / data 无损输出）
+    CV-->>C: 结构树数组（可 JSON 序列化存储）
+    C->>CV: Canvas::fromGraph($spec)
+    CV->>L: 重建图层实例并复现 addRow/addCell 尺寸同步
+    CV-->>C: Canvas 实例（可交给任意 Renderer）
+</script>
+
+<h2>关键决策点（请逐条确认）</h2>
+<table>
+  <tr><th>#</th><th>决策</th><th>取舍</th></tr>
+  <tr><td>1</td><td><b>Renderer 驱动</b>：RendererInterface::render(Canvas): mixed 唯一入口</td><td>Canvas 退为纯数据容器（只有访问器），不依赖任何 Renderer</td></tr>
+  <tr><td>2</td><td>通用遍历收进 AbstractRenderer 模板方法（resolve→begin→walk→end）</td><td>两个后端只实现 draw* 原语；特殊后端可直接实现接口绕过基类</td></tr>
+  <tr><td>3</td><td>类型分派：Renderer 内 instanceof → protected draw* 方法</td><td>不引入 visitor 双分派；新增后端=一个类</td></tr>
+  <tr><td>4</td><td>布局计算留在 Layer（纯函数），不进 Renderer</td><td>断行/对齐/autoHeight 两端共享，排版不分叉</td></tr>
+  <tr><td>5</td><td>资源物化（下载、QR 生成）由 Renderer 在绘制前调 resolve 完成</td><td>Renderer 只见本地路径；不再混入 setter</td></tr>
+  <tr><td>6</td><td>容器下钻：Renderer 直画根表面 + 坐标偏移栈</td><td>取代"子层渲染中间位图再 insert"，结果等价</td></tr>
+  <tr><td>7</td><td>兼容：Layer::render() 保留为 deprecated 快捷方式（内部 new ImageRenderer 跑一遍）</td><td>现有用户代码不断，最终移除</td></tr>
+  <tr><td>8</td><td>graph() 补无损 + 新增 fromGraph()</td><td>修三处有损：TableLayer 只存首行、字体只存 basename、QR 未生成时 value 为空</td></tr>
+</table>
+
+<h2>四、拆包评估（Renderer 独立成包）</h2>
+<p class="note">
+  <b>结论：建议拆，但分两阶段</b>——先在当前仓库内完成目录/命名空间分层（成本≈0），等 PdfRenderer 落地、
+  RendererInterface 经历一轮真实使用稳定后，再物理拆仓。
+</p>
+<script type="text/plain" class="mermaid-src">
+flowchart LR
+    APP[业务代码] --> IR
+    APP --> PR
+    IR["hankchen/php-canvas-image-renderer<br/>require: 核心包 + intervention/image"]
+    PR["hankchen/php-canvas-pdf-renderer<br/>require: 核心包 + tFPDF/TCPDF"]
+    IR --> CORE
+    PR --> CORE
+    CORE["hankchen/php-canvas 核心<br/>Canvas / Layer / RendererInterface / AbstractRenderer / ResourceResolver<br/>require: php + endroid/qr-code（仅此而已）"]
+</script>
+<table>
+  <tr><th>判据 / 放置细节</th><th>结论</th></tr>
+  <tr><td>为什么拆</td><td>依赖隔离是硬收益：intervention/image 的 ext-gd/ext-imagick 是全项目唯一 PHP 扩展硬依赖，PDF-only 用户不该背上；flysystem 核心+adapter 是成熟先例；第三方可实现 svg-renderer</td></tr>
+  <tr><td>RendererInterface + AbstractRenderer 放哪</td><td><b>核心包</b>——遍历/分派/偏移栈只依赖结构类型，放下游会逼后端包互相依赖或复制遍历逻辑</td></tr>
+  <tr><td>ResourceResolver（含 endroid）放哪</td><td><b>核心包</b>——QrCodeLayer 是结构层类型，任何后端都要物化，放下游会在每个后端重复</td></tr>
+  <tr><td>deprecated Layer::render() 兼容垫</td><td>与"核心零感知渲染"矛盾：1.x 保留原样，2.0 拆包时随分离一起移除；BC 路径 $layer-&gt;render() → (new ImageRenderer())-&gt;renderLayer($layer)（renderLayer 放 image-renderer 包）</td></tr>
+  <tr><td>代价</td><td>3 份仓库维护、跨包联动发版 → 契约标注 @api 严格 semver，后端包约束核心 ^2.0；核心包测试不再依赖图像扩展，driver 差异 hack 全留 image-renderer 包</td></tr>
+  <tr><td>拆包时核心 require</td><td>收缩为 php + endroid/qr-code；suggest 指向两个渲染器包</td></tr>
+</table>
+
+<h2>迁移顺序（阶段化）</h2>
+<ol>
+  <li>阶段一（同仓）：src/Renderer/（契约 + AbstractRenderer + Resolver）与 src/Renderer/Image/ 分层，完成迁移 1–3 步；</li>
+  <li>阶段二（同仓）：src/Renderer/Pdf/ 实现 PdfRenderer，用真实场景打磨接口；</li>
+  <li>阶段三（拆仓）：接口稳定后物理拆为 3 包，核心 require 收缩为 php + endroid/qr-code。</li>
+</ol>
+
+<script>
+  // script[type=text/plain] 内的 <br/> 不会被浏览器解析为元素，取 textContent 原样交给 mermaid
+  document.querySelectorAll('script.mermaid-src').forEach(function (s) {
+    var pre = document.createElement('pre');
+    pre.className = 'mermaid';
+    pre.textContent = s.textContent.trim();
+    s.replaceWith(pre);
+  });
+  mermaid.initialize({ startOnLoad: true, theme: 'default', sequence: { actorMargin: 24, noteMargin: 10 } });
+</script>
+</body>
+</html>
