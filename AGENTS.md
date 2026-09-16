@@ -26,7 +26,7 @@ composer test          # vendor/bin/phpunit
 php -l src/...         # 改动文件语法检查
 ```
 
-本机 composer 全局走阿里云镜像且元数据滞后（不认识 intervention/image 4.x 与 endroid/qr-code 6.x 稳定版）：安装依赖用仓库内 `composer.lock` 直接 `composer install`；必须重新解析时临时 `composer config repo.packagist.org composer https://repo.packagist.org` 再 update，随后 unset 并用脚本重算 lock 的 content-hash。CI 从 packagist 解析，无此问题。image-renderer 包的改动在 `../php-canvas-image-renderer` 仓库做，其测试含像素取样。
+本机 composer 依赖解析走 **packagist 直连**（全局 aliyun 镜像已移除——其元数据滞后，曾解析不到 intervention/image 4.x 与 endroid/qr-code 6.x 稳定版）。如需恢复国内镜像自行执行 `composer config -g repos.packagist composer https://mirrors.aliyun.com/composer/`，注意滞后风险。安装依赖用仓库内 `composer.lock` 直接 `composer install` 即可。
 
 ## Rules and gotchas
 
