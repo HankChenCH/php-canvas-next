@@ -141,6 +141,11 @@ class TextLayer extends AbstractLayer
         return $this;
     }
 
+    public function getAutowrap(): bool
+    {
+        return $this->autowrap;
+    }
+
     public function setAngle(int $angle): static
     {
         $this->textAngle = $angle;

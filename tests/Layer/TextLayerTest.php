@@ -78,6 +78,16 @@ class TextLayerTest extends CanvasTestCase
         $this->assertSame(30, $layer->getHeight());
     }
 
+    public function testAutowrapGetterReflectsSetter(): void
+    {
+        $layer = TextLayer::make(100, 'auto');
+
+        $this->assertFalse($layer->getAutowrap());
+
+        $layer->setAutowrap(true);
+        $this->assertTrue($layer->getAutowrap());
+    }
+
     public function testGraphKeepsFullFontValue(): void
     {
         // 无损：font 保留完整原始值（旧库只存 basename）
