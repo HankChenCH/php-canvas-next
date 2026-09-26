@@ -15,10 +15,12 @@ use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
 use InvalidArgumentException;
 
 /**
- * 渲染器模板基类：通用逻辑（资源物化 → 建渲染面 → 遍历/分派 → 容器下钻 → 收尾）
+ * 渲染器模板基类：通用逻辑（建渲染面 → 遍历/分派 → 容器下钻 → 收尾）
  *
  * 遍历时维护坐标偏移栈，所有图层直接绘制在同一渲染面上；
- * 绘制原语（drawRect/drawImage/drawText）由具体后端实现
+ * 绘制原语（drawRect/drawImage/drawText）由具体后端实现。
+ * 资源物化（spec §4.3）：渲染器无预遍历，绘制分派前按需惰性物化——
+ * 失败即抛、渲染面丢弃、无产物逃逸（begin 已开的渲染面随异常丢弃）
  */
 abstract class AbstractRenderer implements RendererInterface
 {
@@ -31,8 +33,6 @@ abstract class AbstractRenderer implements RendererInterface
      */
     final public function render(Canvas $canvas): mixed
     {
-        $this->resolver->resolve($canvas);
-
         $this->begin($canvas->getWidth(), $canvas->getHeight());
         foreach ($canvas->getLayers() as $layer) {
             $this->paint($layer, 0, 0, $canvas->getWidth(), $canvas->getHeight());
@@ -46,8 +46,6 @@ abstract class AbstractRenderer implements RendererInterface
      */
     public function renderLayer(AbstractLayer $layer): mixed
     {
-        $this->resolver->resolveLayer($layer);
-
         $this->begin($layer->getWidth(), $layer->getHeight());
         $this->paint($layer, 0, 0, $layer->getWidth(), $layer->getHeight());
 
@@ -116,6 +114,9 @@ abstract class AbstractRenderer implements RendererInterface
 
     private function paintImage(ImageLayer $layer, int $x, int $y): void
     {
+        // 绘制分派前按需物化（spec §4.3）：失败即抛，渲染面丢弃
+        $this->resolver->resolveLayer($layer);
+
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
         $src = $layer->getResolvedSrc();
@@ -127,6 +128,8 @@ abstract class AbstractRenderer implements RendererInterface
 
     private function paintText(TextLayer $layer, int $x, int $y): void
     {
+        $this->resolver->resolveLayer($layer);
+
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
         $padding = $layer->getPadding();
@@ -152,6 +155,8 @@ abstract class AbstractRenderer implements RendererInterface
 
     private function paintQrCode(QrCodeLayer $layer, int $x, int $y): void
     {
+        $this->resolver->resolveLayer($layer);
+
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
         $src = $layer->getResolvedSrc();

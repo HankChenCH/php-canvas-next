@@ -6,6 +6,7 @@ use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\QrCodeLayer;
 use HankChen\CanvasNext\Layer\TextLayer;
+use HankChen\CanvasNext\Exception\MaterializeException;
 use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
 use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
 use HankChen\CanvasNext\Tests\Support\FakeDownloader;
@@ -72,10 +73,14 @@ class ResourceResolverTest extends CanvasTestCase
     {
         $resolver = $this->resolverWith(false);
 
-        $this->expectException(\Exception::class);
-        $this->expectExceptionMessage('could not get remote file');
-
-        $resolver->resolveLayer(ImageLayer::make(10, 10)->setImage('https://cdn.example.com/missing.png'));
+        try {
+            $resolver->resolveLayer(ImageLayer::make(10, 10)->setImage('https://cdn.example.com/missing.png'));
+            $this->fail('下载失败必须抛错');
+        } catch (MaterializeException $e) {
+            // 绘制期错误 code 化（spec §5.2）：code 稳定，消息保留原始上下文
+            $this->assertSame('resource_download_failed', $e->getErrorCode());
+            $this->assertStringContainsString('could not get remote file', $e->getMessage());
+        }
     }
 
     public function testRemoteFontMaterialized(): void

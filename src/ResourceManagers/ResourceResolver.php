@@ -8,7 +8,7 @@ use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\RoundBlockSizeMode;
 use Endroid\QrCode\Writer\PngWriter;
-use Exception;
+use HankChen\CanvasNext\Exception\MaterializeException;
 use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Contracts\DownloaderInterface;
 use HankChen\CanvasNext\Layer\AbstractLayer;
@@ -20,13 +20,15 @@ use HankChen\CanvasNext\Layer\TableRowLayer;
 use HankChen\CanvasNext\Layer\TextLayer;
 
 /**
- * 资源物化：渲染前的统一准备阶段
+ * 资源物化：绘制分派前按需物化（spec §4.3，渲染期角色重述）
  *
  * 把图层里的远程引用（图片 URL / 字体 URL）下载到本地缓存、把二维码内容
- * 生成为本地 PNG，并将物化结果回写到图层。渲染端只见本地路径
+ * 生成为本地 PNG，并将物化结果回写到图层。渲染端只见本地路径。
+ * 逻辑与渲染前预遍历时代零差异——变化只在调用时机：由渲染器绘制分支
+ * 惰性调用（未引用资源零开销），物化失败即抛、渲染面丢弃、无产物逃逸
  *
  * 缓存目录 sys_get_temp_dir()/canvas-next/，与旧库 php-canvas 共存时互不污染；
- * 同一资源按 URL basename 缓存，命中即跳过下载（无失效机制，与旧库一致）
+ * 同一资源按 URL basename 缓存，命中即跳过下载（天然兼同 pass memo，无失效机制）
  */
 class ResourceResolver
 {
@@ -93,11 +95,11 @@ class ResourceResolver
         if (!is_file($path)) {
             $content = $this->downloader->download($src);
             if (!$content) {
-                throw new Exception("could not get remote file({$src})");
+                throw new MaterializeException('resource_download_failed', "resource_download_failed: could not get remote file({$src})");
             }
 
             if (!file_put_contents($path, $content)) {
-                throw new Exception("remote file({$src}) save to tmp path failed");
+                throw new MaterializeException('resource_save_failed', "resource_save_failed: remote file({$src}) save to tmp path failed");
             }
         }
 
@@ -116,11 +118,11 @@ class ResourceResolver
         if (!is_file($path)) {
             $content = $this->downloader->download($font);
             if (!$content) {
-                throw new Exception("could not get remote file({$font})");
+                throw new MaterializeException('resource_download_failed', "resource_download_failed: could not get remote file({$font})");
             }
 
             if (!file_put_contents($path, $content)) {
-                throw new Exception("remote file({$font}) save to tmp path failed");
+                throw new MaterializeException('resource_save_failed', "resource_save_failed: remote file({$font}) save to tmp path failed");
             }
         }
 
@@ -152,7 +154,7 @@ class ResourceResolver
             'qr_' . md5($layer->getText() . '_' . $layer->getWidth()) . '.png'
         );
         if (!is_file($path) && !file_put_contents($path, $png)) {
-            throw new Exception("qr code save to tmp path failed: {$path}");
+            throw new MaterializeException('qr_generate_failed', "qr_generate_failed: qr code save to tmp path failed: {$path}");
         }
 
         $layer->setResolvedSrc($path);
@@ -167,7 +169,7 @@ class ResourceResolver
 
         $parsed = parse_url($url);
         if (!$parsed || !isset($parsed['path'])) {
-            throw new Exception("resource url parse failed:{$url}");
+            throw new MaterializeException('resource_download_failed', "resource_download_failed: resource url parse failed:{$url}");
         }
 
         return $dir . DIRECTORY_SEPARATOR . pathinfo($parsed['path'], PATHINFO_BASENAME);
@@ -186,7 +188,7 @@ class ResourceResolver
         }
 
         if (!is_dir($tmpPath) && !@mkdir($tmpPath, 0755, true) && !is_dir($tmpPath)) {
-            throw new Exception("tmp path can not writable:" . $tmpPath);
+            throw new MaterializeException('resource_save_failed', 'resource_save_failed: tmp path can not writable:' . $tmpPath);
         }
 
         if (!is_writable($tmpPath) || !is_executable($tmpPath)) {
@@ -194,7 +196,7 @@ class ResourceResolver
         }
 
         if (!is_writable($tmpPath) || !is_executable($tmpPath)) {
-            throw new Exception("tmp path can not writable:" . $tmpPath);
+            throw new MaterializeException('resource_save_failed', 'resource_save_failed: tmp path can not writable:' . $tmpPath);
         }
 
         return $tmpPath;
