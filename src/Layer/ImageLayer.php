@@ -14,6 +14,12 @@ class ImageLayer extends AbstractLayer
 
     private ?string $rawImg = null;
 
+    /**
+     * 数据表达式标记（spec §3.1）：非 null = 已标记（valueType='ExpressionValue'），
+     * src 由展开阶段按行求值；null = 字面直通
+     */
+    private ?string $expression = null;
+
     /** Resolver 物化后的本地路径，渲染端优先使用 */
     private ?string $resolvedSrc = null;
 
@@ -26,8 +32,28 @@ class ImageLayer extends AbstractLayer
     {
         $this->rawImg = ($img === '' || $img === null) ? null : $img;
         $this->resolvedSrc = null;
+        $this->expression = null; // 字面赋值解除标记
 
         return $this;
+    }
+
+    /**
+     * 标记数据表达式（spec §3.1）：value 恒镜像表达式原文；
+     * expression 键条件写键——未标记保持现状两键，保 Go↔PHP 字节 parity
+     */
+    public function setExpression(string $expression): static
+    {
+        $this->expression = $expression;
+        $this->rawImg = $expression;
+        $this->resolvedSrc = null;
+
+        return $this;
+    }
+
+    /** 已标记的数据表达式；未标记返回 null */
+    public function getExpression(): ?string
+    {
+        return $this->expression;
     }
 
     public function getImage(): ?string
@@ -79,16 +105,23 @@ class ImageLayer extends AbstractLayer
     {
         $graph = parent::graph();
 
-        $graph['data'] = [
-            'valueType' => 'StaticValue',
-            'value' => $this->rawImg,
-        ];
+        $graph['data'] = $this->expression !== null
+            ? ['valueType' => 'ExpressionValue', 'expression' => $this->expression, 'value' => $this->rawImg]
+            // 现状两键形态（条件写键）
+            : ['valueType' => 'StaticValue', 'value' => $this->rawImg];
 
         return $graph;
     }
 
     public static function fromGraph(array $graph): static
     {
-        return parent::fromGraph($graph)->setImage($graph['data']['value'] ?? null);
+        $layer = parent::fromGraph($graph);
+
+        $data = $graph['data'] ?? [];
+        if (($data['valueType'] ?? null) === 'ExpressionValue' && isset($data['expression'])) {
+            return $layer->setExpression((string) $data['expression']);
+        }
+
+        return $layer->setImage($data['value'] ?? null);
     }
 }

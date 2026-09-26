@@ -17,6 +17,11 @@ class TextLayer extends AbstractLayer
     protected string $name = self::TYPE;
 
     protected string $text = '';
+    /**
+     * 数据表达式标记（spec §3.1）：非 null = 已标记（valueType='ExpressionValue'，
+     * 仅标记字段进求值）；null = 字面直通（数据集在场也不误伤存量文案里的字面 {{）
+     */
+    private ?string $expression = null;
     /** 字体文件路径/URL；空串或纯数字表示使用渲染端内置默认字体 */
     protected string $font = '';
     protected int $fontSize = 12;
@@ -81,6 +86,7 @@ class TextLayer extends AbstractLayer
     public function setText(string $text): static
     {
         $this->text = $text;
+        $this->expression = null; // 字面赋值解除标记，value 与 expression 的镜像关系随之解除
 
         return $this;
     }
@@ -88,6 +94,24 @@ class TextLayer extends AbstractLayer
     public function getText(): string
     {
         return $this->text;
+    }
+
+    /**
+     * 标记数据表达式（spec §3.1）：expression 承载插值模板，
+     * data.value 恒镜像表达式原文（求值结果永不落 graph）
+     */
+    public function setExpression(string $expression): static
+    {
+        $this->expression = $expression;
+        $this->text = $expression;
+
+        return $this;
+    }
+
+    /** 已标记的数据表达式；未标记返回 null */
+    public function getExpression(): ?string
+    {
+        return $this->expression;
     }
 
     /**
@@ -227,11 +251,10 @@ class TextLayer extends AbstractLayer
             'autowrap' => $this->autowrap,
         ];
 
-        $graph['data'] = [
-            'valueType' => 'StaticValue',
-            'expression' => '',
-            'value' => $this->text,
-        ];
+        $graph['data'] = $this->expression !== null
+            ? ['valueType' => 'ExpressionValue', 'expression' => $this->expression, 'value' => $this->text]
+            // 现状恒写三键形态（TextLayer 维持恒写 expression 键）
+            : ['valueType' => 'StaticValue', 'expression' => '', 'value' => $this->text];
 
         return $graph;
     }
@@ -253,6 +276,11 @@ class TextLayer extends AbstractLayer
             $layer->setAutowrap((bool) $font['autowrap']);
         }
 
-        return $layer->setText($graph['data']['value'] ?? '');
+        $data = $graph['data'] ?? [];
+        if (($data['valueType'] ?? null) === 'ExpressionValue' && isset($data['expression'])) {
+            return $layer->setExpression((string) $data['expression']);
+        }
+
+        return $layer->setText($data['value'] ?? '');
     }
 }
