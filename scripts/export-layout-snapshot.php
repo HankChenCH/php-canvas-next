@@ -28,6 +28,7 @@ use HankChen\CanvasNext\Layer\QrCodeLayer;
 use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableCellLayer;
 use HankChen\CanvasNext\Layer\TableRowLayer;
+use HankChen\CanvasNext\Layer\TableRowTemplate;
 use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\Renderer\AbstractRenderer;
 use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
@@ -240,7 +241,44 @@ function buildCases(): array
             '九锚点摆位 + 负偏移溢出 + priority 渲染次序 + 表格嵌套（行堆叠/单元格横排/单元格 content:null/表格内容层）',
             buildAnchorsAndContainers()
         ),
+        exportCase(
+            'table-template-wire',
+            'TableLayer V2 模板态 wire 三端 parity（go-canvas 工票 12）：template 键 + data.rowsPath + TableRowTemplate 类型'
+            . ' + 表达式标记（Text 恒写 expression 三键 / Image 条件两键）；模板态渲染 = 空壳（表壳按声明画，行区零高），V1 具体行表同画布对照',
+            buildTemplateWire()
+        ),
     ];
+}
+
+/**
+ * 模板表声明态 wire 用例（TableLayer V2，spec §2）：模板表与 V1 表同画布对照。
+ * 模板行 = auto 文本格（表达式标记，value 镜像原文）+ 固定空 src 图片格
+ * （渲染期惰性物化按需，空引用跳过不下载）
+ */
+function buildTemplateWire(): Canvas
+{
+    $row = (new TableRowTemplate())->setHeight('auto');
+    $textCell = (new TableCellLayer())->setWidth(160)->setHeight('auto');
+    $textCell->addTemplateContentLayer(
+        TextLayer::make(160, 'auto')->setExpression('姓名：{{row.name}}')->setFont('', 12, '#000000')
+    );
+    $imageCell = (new TableCellLayer())->setWidth(160)->setHeight(40);
+    $imageCell->addTemplateContentLayer(ImageLayer::make(160, 40));
+    $row->addCell($textCell)->addCell($imageCell);
+
+    $templateTable = TableLayer::make(320, 200, '#ffffff');
+    $templateTable->setRowsPath('order.items');
+    $templateTable->setTemplate($row);
+
+    $v1Cell = (new TableCellLayer())->setWidth(320)->setHeight(30);
+    $v1Cell->addContentLayer(
+        TextLayer::make(320, 30)->setText('V1 具体行')->setFont('', 12, '#000000')
+    );
+    $v1Table = TableLayer::make(320, 100, '#f0f0f0')
+        ->setPosition(0, 220)
+        ->addRow(TableRowLayer::make(320, 30)->addCell($v1Cell));
+
+    return Canvas::make(320, 320, $templateTable, $v1Table);
 }
 
 /** 对齐锚点用例：九宫格对齐组合 + 两个特殊分支图层 */
