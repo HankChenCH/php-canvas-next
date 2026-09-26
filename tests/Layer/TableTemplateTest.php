@@ -192,7 +192,7 @@ class TableTemplateTest extends CanvasTestCase
         $rebuilt = TableLayer::fromGraph($this->templateTable()->graph());
         $template = $rebuilt->getTemplate();
 
-        // 高度耦合全豁免：声明高与 autoHeight 标志原样保留（弹性信息留给展开）
+        // 高度耦合全豁免：声明高与 autoHeight 标志原样保留（弹性信息留给填充）
         $this->assertTrue($template->graph()['spec']['shape']['autoHeight']);
 
         $autoCell = $template->getCells()[0];

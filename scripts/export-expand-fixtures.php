@@ -11,12 +11,12 @@ declare(strict_types=1);
  *   expect = 求值结果串 | {errorCode}（spec §5.2 稳定 code，三端一致性抓手）
  *
  * - expand-semantics.json（contract: expand-semantics v1）
- *   展开步骤语义用例：{name, description, graph, dataset, expect}
- *   管线 = graph → Canvas::fromGraph → CanvasExpander::expand → graph
+ *   数据填充（hydrate）语义用例：{name, description, graph, dataset, expect}
+ *   管线 = graph → Canvas::fromGraph → CanvasHydrator::hydrate → graph
  *   （解码期错误 template_rows_conflict / rows_path_missing 同管线可表达）；
- *   expect = {graph: 展开后 graph（含 V1 高度耦合重放结果）} | {errorCode}
+ *   expect = {graph: 填充后 graph（含 V1 高度耦合重放结果）} | {errorCode}
  *
- * 用例语义源 = php-canvas-next 单测（tests/Expression + tests/Expand）逐用例平移；
+ * 用例语义源 = php-canvas-next 单测（tests/Expression + tests/Hydrate）逐用例平移；
  * 导出即自检：PHP 实际行为与 authored 期望不符直接失败，防 fixture 与实现漂移。
  *
  * 用法: php scripts/export-expand-fixtures.php [输出目录]
@@ -28,7 +28,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Exception\CanvasNextExceptionInterface;
-use HankChen\CanvasNext\Expand\CanvasExpander;
+use HankChen\CanvasNext\Hydrate\CanvasHydrator;
 use HankChen\CanvasNext\Expression\InterpolationEvaluator;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\QrCodeLayer;
@@ -149,7 +149,7 @@ function exportExpressionCase(array $case): array
 // ---------------------------------------------------------------------------
 
 /**
- * 主模板表（语义源 CanvasExpanderTest::templateTable）：
+ * 主模板表（语义源 CanvasHydratorTest::templateTable）：
  * auto 文本格（行上下文求值 + $index）+ 固定图片格（资源类求值），rowsPath = order.items
  */
 function fixtureTemplateTable(): TableLayer
@@ -244,7 +244,7 @@ function nestedTemplateTable(): TableLayer
     return $outerTable;
 }
 
-/** 展开语义用例集。管线 = graph → fromGraph → expand；错误码可 authored 自检 */
+/** 填充语义用例集。管线 = graph → fromGraph → hydrate；错误码可 authored 自检 */
 function expandCases(): array
 {
     // 用例 graph 一律画布级（Canvas::fromGraph 的输入形态，与 layout-snapshot 同构）
@@ -334,18 +334,18 @@ function expandCases(): array
     ];
 }
 
-/** 导出单个展开用例：管线 = graph → fromGraph → expand，authored 错误码自检 */
+/** 导出单个填充用例：管线 = graph → fromGraph → hydrate，authored 错误码自检 */
 function exportExpandCase(array $case): array
 {
     [$graph, $dataset, $expectedErrorCode, $name, $description] = $case;
 
     try {
         $decoded = Canvas::fromGraph($graph);
-        $expanded = (new CanvasExpander())->expand($decoded, $dataset);
+        $hydrated = (new CanvasHydrator())->hydrate($decoded, $dataset);
         if ($expectedErrorCode !== null) {
-            throw new RuntimeException("用例 {$name}：预期报错 {$expectedErrorCode} 但展开成功");
+            throw new RuntimeException("用例 {$name}：预期报错 {$expectedErrorCode} 但填充成功");
         }
-        $expect = ['graph' => $expanded->graph()];
+        $expect = ['graph' => $hydrated->graph()];
     } catch (CanvasNextExceptionInterface $e) {
         if ($expectedErrorCode !== null && $e->getErrorCode() !== $expectedErrorCode) {
             throw new RuntimeException("用例 {$name}：错误码 {$e->getErrorCode()} 与预期 {$expectedErrorCode} 不符");
@@ -380,7 +380,7 @@ $documents = [
             'notes' => [
                 '默认求值器（受限插值）语义用例，语义源 php-canvas-next tests/Expression/InterpolationEvaluatorTest.php 逐用例平移；',
                 'context 形状为契约层钉定（spec §3.2）：row 键 = 行命名空间、裸名 = 数据集根键、$index（自 1 起）/$root 保留名；',
-                '缺字段/null = 空串信号（字段类兜底/报错策略由展开器施加，spec §3.4）；数组/对象落到标量位 = expression_type_mismatch；',
+                '缺字段/null = 空串信号（字段类兜底/报错策略由填充器施加）；数组/对象落到标量位 = expression_type_mismatch；',
                 'expect = 求值结果串 | {errorCode}；code 清单见 spec §5.2，三端一致性抓手；',
                 '数值字符串化只锁常规区间（整数/常规小数）；极端浮点（科学计数法阈值）的格式化语义归求值器 spec effort，不入 fixture；',
                 '再生成: go-canvas 仓 make expand-fixtures（需本机 PHP 8.3）',
@@ -393,11 +393,11 @@ $documents = [
             'contract' => 'expand-semantics v1',
             'generator' => 'php-canvas-next/scripts/export-expand-fixtures.php',
             'notes' => [
-                '展开步骤语义用例，语义源 php-canvas-next tests/Expand/CanvasExpanderTest.php 逐用例平移（另含 QR/嵌套两个扩覆盖用例）；',
+                '数据填充（hydrate）语义用例，语义源 php-canvas-next tests/Hydrate/CanvasHydratorTest.php 逐用例平移（另含 QR/嵌套两个扩覆盖用例）；',
                 'runner 管线 = graph → 反序列化重建 → expand(dataset) → graph，与 PHP 导出管线同构（Go: canvas.FromGraph → expand）；',
-                '解码期错误（template_rows_conflict/rows_path_missing）与展开期错误同管线表达，expect = {graph} | {errorCode}（spec §5.2）；',
+                '解码期错误（template_rows_conflict/rows_path_missing）与填充期错误同管线表达，expect = {graph} | {errorCode}（spec §5.2）；',
                 'dataset null = 未绑数据集恒等直通（含模板表）；无标记无模板画布恒等直通；',
-                '展开产物 graph 已含 V1 高度耦合重放结果（行高定稿/固定格内容压平），展开永不回写源 graph；',
+                '填充产物 graph 已含 V1 高度耦合重放结果（行高定稿/固定格内容压平），填充永不回写源 graph；',
                 '再生成: go-canvas 仓 make expand-fixtures（需本机 PHP 8.3）',
             ],
         ],

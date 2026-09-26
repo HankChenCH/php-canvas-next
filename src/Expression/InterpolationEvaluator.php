@@ -3,7 +3,7 @@
 namespace HankChen\CanvasNext\Expression;
 
 use HankChen\CanvasNext\Contracts\ExpressionEvaluatorInterface;
-use HankChen\CanvasNext\Exception\ExpandException;
+use HankChen\CanvasNext\Exception\HydrateException;
 
 /**
  * 默认求值器：mustache 风格外壳 + 受限表达式子集（零依赖纯 PHP，spec §3.6）
@@ -13,9 +13,9 @@ use HankChen\CanvasNext\Exception\ExpandException;
  * 届时以共享 fixture 钉死）。{{ }} 划定表达式片段，其余字面直通；
  * 不含 {{ 的标记串 = 整串字面；未闭合的 {{ 按字面处理
  *
- * 缺字段/null 信号 = 空串（展开器按字段类施加兜底/报错）；
- * 类型不匹配抛 ExpandException(expression_type_mismatch)；
- * row. 前缀在非行上下文抛 ExpandException(expression_row_outside_loop)
+ * 缺字段/null 信号 = 空串（填充器按字段类施加兜底/报错）；
+ * 类型不匹配抛 HydrateException(expression_type_mismatch)；
+ * row. 前缀在非行上下文抛 HydrateException(expression_row_outside_loop)
  */
 final class InterpolationEvaluator implements ExpressionEvaluatorInterface
 {
@@ -42,12 +42,12 @@ final class InterpolationEvaluator implements ExpressionEvaluatorInterface
     private function resolveFragment(string $expr, array $context): string
     {
         if ($expr === '') {
-            throw new ExpandException('expression_syntax_error', 'expression_syntax_error: 空表达式片段');
+            throw new HydrateException('expression_syntax_error', 'expression_syntax_error: 空表达式片段');
         }
 
         $segments = explode('.', $expr);
         if (in_array('', $segments, true)) {
-            throw new ExpandException('expression_syntax_error', "expression_syntax_error: 非法路径 {$expr}");
+            throw new HydrateException('expression_syntax_error', "expression_syntax_error: 非法路径 {$expr}");
         }
 
         $head = array_shift($segments);
@@ -55,7 +55,7 @@ final class InterpolationEvaluator implements ExpressionEvaluatorInterface
         return match ($head) {
             // row. 前缀 = 当前行命名空间；非行上下文（无 'row' 键）= 报错
             'row' => !array_key_exists('row', $context)
-                ? throw new ExpandException('expression_row_outside_loop', 'expression_row_outside_loop: row. 前缀出现在非行上下文')
+                ? throw new HydrateException('expression_row_outside_loop', 'expression_row_outside_loop: row. 前缀出现在非行上下文')
                 : $this->navigateValue($context['row'], $segments, $expr),
             // $root 显式取根，与裸名等价
             '$root' => $this->navigateValue($context, $segments, $expr),
@@ -80,14 +80,14 @@ final class InterpolationEvaluator implements ExpressionEvaluatorInterface
                     return ''; // 缺字段信号
                 }
 
-                throw new ExpandException('expression_type_mismatch', "expression_type_mismatch: {$expr}");
+                throw new HydrateException('expression_type_mismatch', "expression_type_mismatch: {$expr}");
             }
 
             $value = $value[$segment];
         }
 
         if (is_array($value)) {
-            throw new ExpandException('expression_type_mismatch', "expression_type_mismatch: {$expr}");
+            throw new HydrateException('expression_type_mismatch', "expression_type_mismatch: {$expr}");
         }
 
         return $this->stringify($value);

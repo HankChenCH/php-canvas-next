@@ -2,7 +2,7 @@
 
 namespace HankChen\CanvasNext\Tests\Expression;
 
-use HankChen\CanvasNext\Exception\ExpandException;
+use HankChen\CanvasNext\Exception\HydrateException;
 use HankChen\CanvasNext\Expression\InterpolationEvaluator;
 use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
 
@@ -15,7 +15,7 @@ class InterpolationEvaluatorTest extends CanvasTestCase
 {
     private InterpolationEvaluator $evaluator;
 
-    /** 行上下文：行命名空间 + 全局根键混合（根键不得与保留名冲突，由展开器校验） */
+    /** 行上下文：行命名空间 + 全局根键混合（根键不得与保留名冲突，由填充器校验） */
     private array $rowContext;
 
     /** 独立图层上下文 = 全局数据集根 */
@@ -97,7 +97,7 @@ class InterpolationEvaluatorTest extends CanvasTestCase
 
     public function testMissingFieldEvaluatesToEmptyString(): void
     {
-        // 缺字段信号 = 空串（展开器按字段类施加兜底/报错，spec §3.4）
+        // 缺字段信号 = 空串（填充器按字段类施加兜底/报错）
         $this->assertSame('姓名：', $this->evaluator->evaluate('姓名：{{row.nickname}}', $this->rowContext));
         $this->assertSame('', $this->evaluator->evaluate('{{nickname}}', []));
     }
@@ -115,7 +115,7 @@ class InterpolationEvaluatorTest extends CanvasTestCase
         try {
             $this->evaluator->evaluate('{{row.user}}', $this->rowContext);
             $this->fail('数组落到标量位必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('expression_type_mismatch', $e->getErrorCode());
         }
 
@@ -123,7 +123,7 @@ class InterpolationEvaluatorTest extends CanvasTestCase
         try {
             $this->evaluator->evaluate('{{row.name.x}}', $this->rowContext);
             $this->fail('标量中途下钻必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('expression_type_mismatch', $e->getErrorCode());
         }
     }
@@ -134,7 +134,7 @@ class InterpolationEvaluatorTest extends CanvasTestCase
         try {
             $this->evaluator->evaluate('{{row.name}}', $this->rootContext);
             $this->fail('非行上下文的 row. 前缀必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('expression_row_outside_loop', $e->getErrorCode());
         }
     }
@@ -144,7 +144,7 @@ class InterpolationEvaluatorTest extends CanvasTestCase
         try {
             $this->evaluator->evaluate('名：{{}}', $this->rowContext);
             $this->fail('空表达式片段必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('expression_syntax_error', $e->getErrorCode());
         }
     }
@@ -154,7 +154,7 @@ class InterpolationEvaluatorTest extends CanvasTestCase
         try {
             $this->evaluator->evaluate('{{row..name}}', $this->rowContext);
             $this->fail('空路径段必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('expression_syntax_error', $e->getErrorCode());
         }
     }

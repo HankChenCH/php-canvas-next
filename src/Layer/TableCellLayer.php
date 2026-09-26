@@ -30,7 +30,7 @@ class TableCellLayer extends AbstractLayer
 
     /**
      * 模板上下文装配（TableLayer V2，spec §2.3）：只同步内容宽 = 格宽，
-     * 高度耦合全豁免——声明高与 autoHeight 标志原样保留，实例高度由展开定稿
+     * 高度耦合全豁免——声明高与 autoHeight 标志原样保留，实例高度由填充定稿
      */
     public function addTemplateContentLayer(AbstractLayer $contentLayer): static
     {

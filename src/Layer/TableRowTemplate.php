@@ -9,7 +9,7 @@ namespace HankChen\CanvasNext\Layer;
  *
  * 装配语义（spec §2.3）：宽度耦合沿用（行宽=表宽、内容宽=格宽，列版式与数据无关）、
  * 高度耦合全豁免（行/格/内容的声明高与 autoHeight 标志原样保留——
- * 占位内容不参与 V1 高度耦合，实例高度由展开阶段按真实数据定稿）
+ * 占位内容不参与 V1 高度耦合，实例高度由填充阶段按真实数据定稿）
  */
 class TableRowTemplate extends AbstractLayer
 {

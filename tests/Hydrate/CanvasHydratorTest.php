@@ -1,10 +1,10 @@
 <?php
 
-namespace HankChen\CanvasNext\Tests\Expand;
+namespace HankChen\CanvasNext\Tests\Hydrate;
 
 use HankChen\CanvasNext\Canvas;
-use HankChen\CanvasNext\Exception\ExpandException;
-use HankChen\CanvasNext\Expand\CanvasExpander;
+use HankChen\CanvasNext\Exception\HydrateException;
+use HankChen\CanvasNext\Hydrate\CanvasHydrator;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableCellLayer;
@@ -14,17 +14,17 @@ use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
 
 /**
- * 展开步骤（spec §4.2）：渲染前的独立纯结构步骤 expand(Canvas, dataset): Canvas。
+ * hydrate 步骤（数据填充，spec §3）：编译期纯结构步骤 hydrate(Canvas, dataset): Canvas。
  * 全画布标记字段求值 + 模板表实例化，产出具体树（无模板、无表达式、高度定稿）；
- * 展开产物与源图分离，源 graph 永不回写
+ * 填充产物与源图分离，源 graph 永不回写
  */
-class CanvasExpanderTest extends CanvasTestCase
+class CanvasHydratorTest extends CanvasTestCase
 {
-    private CanvasExpander $expander;
+    private CanvasHydrator $hydrator;
 
     protected function setUp(): void
     {
-        $this->expander = new CanvasExpander();
+        $this->hydrator = new CanvasHydrator();
     }
 
     private function templateTable(): TableLayer
@@ -58,14 +58,14 @@ class CanvasExpanderTest extends CanvasTestCase
         ];
     }
 
-    public function testExpandTemplateTableInstantiatesRows(): void
+    public function testHydrateTemplateTableInstantiatesRows(): void
     {
         $canvas = Canvas::make(320, 400, $this->templateTable());
 
-        $expanded = $this->expander->expand($canvas, $this->dataset());
+        $hydrated = $this->hydrator->hydrate($canvas, $this->dataset());
 
         /** @var TableLayer $table */
-        $table = $expanded->getLayers()[0];
+        $table = $hydrated->getLayers()[0];
         $this->assertInstanceOf(TableLayer::class, $table);
 
         // 行实例化：两行数据，模板消失，data 键消失
@@ -79,10 +79,10 @@ class CanvasExpanderTest extends CanvasTestCase
 
     public function testRowContextEvaluationAndOneBasedIndex(): void
     {
-        $expanded = $this->expander->expand(Canvas::make(320, 400, $this->templateTable()), $this->dataset());
+        $hydrated = $this->hydrator->hydrate(Canvas::make(320, 400, $this->templateTable()), $this->dataset());
 
         /** @var TableLayer $table */
-        $table = $expanded->getLayers()[0];
+        $table = $hydrated->getLayers()[0];
 
         /** @var TextLayer $text1 */
         $text1 = $table->getRows()[0]->getCells()[0]->getContentLayer();
@@ -98,18 +98,18 @@ class CanvasExpanderTest extends CanvasTestCase
         $this->assertSame('/tmp/b.png', $image->getImage());
     }
 
-    public function testExpandedHeightsFinalizedByV1CouplingReplay(): void
+    public function testHydratedHeightsFinalizedByV1CouplingReplay(): void
     {
-        $expanded = $this->expander->expand(Canvas::make(320, 400, $this->templateTable()), $this->dataset());
+        $hydrated = $this->hydrator->hydrate(Canvas::make(320, 400, $this->templateTable()), $this->dataset());
 
         /** @var TableLayer $table */
-        $table = $expanded->getLayers()[0];
+        $table = $hydrated->getLayers()[0];
         $row = $table->getRows()[0];
 
         // 宽在声明态同步：行宽 = 表宽
         $this->assertSame(320, $row->getWidth());
 
-        // 高在展开态定稿：行高取最高格（auto 文本格按求值后内容 12，固定格 40）
+        // 高在填充态定稿：行高取最高格（auto 文本格按求值后内容 12，固定格 40）
         $this->assertSame(40, $row->getHeight());
         $this->assertFalse($row->graph()['spec']['shape']['autoHeight']);
 
@@ -124,14 +124,14 @@ class CanvasExpanderTest extends CanvasTestCase
         $this->assertFalse($image->graph()['spec']['shape']['autoHeight']);
     }
 
-    public function testExpandDoesNotPolluteSourceCanvas(): void
+    public function testHydrateDoesNotPolluteSourceCanvas(): void
     {
         $canvas = Canvas::make(320, 400, $this->templateTable());
         $graphBefore = $canvas->graph();
 
-        $this->expander->expand($canvas, $this->dataset());
+        $this->hydrator->hydrate($canvas, $this->dataset());
 
-        // 展开产物与源图分离：源仍是声明态
+        // 填充产物与源图分离：源仍是声明态
         $this->assertSame($graphBefore, $canvas->graph());
         $this->assertInstanceOf(TableRowTemplate::class, $canvas->getLayers()[0]->getTemplate());
     }
@@ -145,15 +145,15 @@ class CanvasExpanderTest extends CanvasTestCase
             ImageLayer::make(60, 60)->setExpression('{{orderNo}}.png')
         );
 
-        $expanded = $this->expander->expand($canvas, $this->dataset());
+        $hydrated = $this->hydrator->hydrate($canvas, $this->dataset());
 
         /** @var TextLayer $text */
-        $text = $expanded->getLayers()[0];
+        $text = $hydrated->getLayers()[0];
         $this->assertSame('订单号：A2026-001', $text->getText());
         $this->assertNull($text->getExpression());
 
         /** @var ImageLayer $image */
-        $image = $expanded->getLayers()[1];
+        $image = $hydrated->getLayers()[1];
         $this->assertSame('A2026-001.png', $image->getImage());
         $this->assertNull($image->getExpression());
     }
@@ -169,13 +169,13 @@ class CanvasExpanderTest extends CanvasTestCase
         $row->addCell($cell);
         $table->addRow($row);
 
-        $expanded = $this->expander->expand(Canvas::make(320, 400, $table), $this->dataset());
+        $hydrated = $this->hydrator->hydrate(Canvas::make(320, 400, $table), $this->dataset());
 
-        /** @var TableLayer $expandedTable */
-        $expandedTable = $expanded->getLayers()[0];
-        $this->assertCount(1, $expandedTable->getRows());
+        /** @var TableLayer $hydratedTable */
+        $hydratedTable = $hydrated->getLayers()[0];
+        $this->assertCount(1, $hydratedTable->getRows());
         /** @var TextLayer $text */
-        $text = $expandedTable->getRows()[0]->getCells()[0]->getContentLayer();
+        $text = $hydratedTable->getRows()[0]->getCells()[0]->getContentLayer();
         $this->assertSame('A2026-001', $text->getText());
     }
 
@@ -184,19 +184,19 @@ class CanvasExpanderTest extends CanvasTestCase
         // 未绑数据集：不跑求值器，全字面（标记字段按 value 镜像显示原文）
         $canvas = Canvas::make(320, 400, $this->templateTable());
 
-        $expanded = $this->expander->expand($canvas, null);
+        $hydrated = $this->hydrator->hydrate($canvas, null);
 
-        $this->assertSame($canvas, $expanded);
+        $this->assertSame($canvas, $hydrated);
     }
 
     public function testCanvasWithoutBindingsIsIdentity(): void
     {
         $canvas = Canvas::make(320, 100, TextLayer::make(100, 30)->setText('字面 {{orderNo}} 文案'));
 
-        $expanded = $this->expander->expand($canvas, $this->dataset());
+        $hydrated = $this->hydrator->hydrate($canvas, $this->dataset());
 
         // 无标记无模板：恒等直通（存量文案里的字面 {{ 不误伤）
-        $this->assertSame($canvas, $expanded);
+        $this->assertSame($canvas, $hydrated);
     }
 
     public function testEmptyRowArrayYieldsEmptyShell(): void
@@ -204,10 +204,10 @@ class CanvasExpanderTest extends CanvasTestCase
         $canvas = Canvas::make(320, 400, $this->templateTable());
         $dataset = ['order' => ['items' => []]];
 
-        $expanded = $this->expander->expand($canvas, $dataset);
+        $hydrated = $this->hydrator->hydrate($canvas, $dataset);
 
         /** @var TableLayer $table */
-        $table = $expanded->getLayers()[0];
+        $table = $hydrated->getLayers()[0];
         // 空数组 = 合法零行，空壳渲染（表壳按声明画，行区零高）
         $this->assertSame([], $table->getRows());
         $this->assertNull($table->getTemplate());
@@ -218,9 +218,9 @@ class CanvasExpanderTest extends CanvasTestCase
         $canvas = Canvas::make(320, 400, $this->templateTable());
 
         try {
-            $this->expander->expand($canvas, ['orderNo' => 'A2026-001']);
+            $this->hydrator->hydrate($canvas, ['orderNo' => 'A2026-001']);
             $this->fail('rowsPath 指向缺键必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('rows_path_invalid', $e->getErrorCode());
         }
     }
@@ -230,9 +230,9 @@ class CanvasExpanderTest extends CanvasTestCase
         $canvas = Canvas::make(320, 400, $this->templateTable());
 
         try {
-            $this->expander->expand($canvas, ['order' => ['items' => 'not-an-array']]);
+            $this->hydrator->hydrate($canvas, ['order' => ['items' => 'not-an-array']]);
             $this->fail('rowsPath 指向非数组必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('rows_path_invalid', $e->getErrorCode());
         }
     }
@@ -246,9 +246,9 @@ class CanvasExpanderTest extends CanvasTestCase
         );
 
         try {
-            $this->expander->expand($canvas, ['row' => ['name' => 'x']]);
+            $this->hydrator->hydrate($canvas, ['row' => ['name' => 'x']]);
             $this->fail('根级键名 row 必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('reserved_root_key', $e->getErrorCode());
         }
     }
@@ -262,9 +262,9 @@ class CanvasExpanderTest extends CanvasTestCase
         );
 
         try {
-            $this->expander->expand($canvas, ['$meta' => 1, 'orderNo' => 'A']);
+            $this->hydrator->hydrate($canvas, ['$meta' => 1, 'orderNo' => 'A']);
             $this->fail('$ 前缀根级键名必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('reserved_root_key', $e->getErrorCode());
         }
     }
@@ -275,9 +275,9 @@ class CanvasExpanderTest extends CanvasTestCase
         $dataset = ['order' => ['items' => [['name' => '张三']]]]; // avatar 缺失
 
         try {
-            $this->expander->expand($canvas, $dataset);
+            $this->hydrator->hydrate($canvas, $dataset);
             $this->fail('资源类字段求值空串必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('expression_empty_resource', $e->getErrorCode());
         }
     }
@@ -298,9 +298,9 @@ class CanvasExpanderTest extends CanvasTestCase
         $canvas = Canvas::make(320, 400, $table);
 
         try {
-            $this->expander->expand($canvas, ['items' => [['tags' => ['a', 'b']]]]);
+            $this->hydrator->hydrate($canvas, ['items' => [['tags' => ['a', 'b']]]]);
             $this->fail('数组落到标量位必须报错');
-        } catch (ExpandException $e) {
+        } catch (HydrateException $e) {
             $this->assertSame('expression_type_mismatch', $e->getErrorCode());
         }
     }

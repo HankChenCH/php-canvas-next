@@ -11,9 +11,9 @@ PHP library `hankchen/php-canvas-next`（`hankchen/php-canvas` 的下一代）�
 - `src/Layer/*.php` — `ImageLayer`（只存引用，`setResolvedSrc` 供 Resolver 回写，可标记数据表达式）、`TextLayer`（断行/度量可注入，`getLines()`/`getTextOrigin()`/`lineHeightPx()` 是布局纯函数，可标记数据表达式）、`QrCodeLayer`（只存 text，可标记数据表达式）、`TableLayer → TableRowLayer → TableCellLayer`（add* 时同步父子尺寸，容器暴露 `getRows/getCells/getContentLayer`）、`TableRowTemplate`（V2 模板行：宽度耦合沿用、高度耦合全豁免的专用装配路径 `addCell`/`TableCellLayer::addTemplateContentLayer`，仅合法出现在 TableLayer 的 template 字段内）。
 - `src/Layer/LayerFactory.php` — 按 graph 的 `type` 标识重建图层。
 - `src/Contracts/` — `RendererInterface`（`render(Canvas): mixed`，唯一公开渲染入口，`@api`）、`LineBreakerInterface`、`TextMeasurerInterface`（已配置的宽度度量器）与 `TextMeasurerFactoryInterface`（策略注入点）、`DownloaderInterface`、`ExpressionEvaluatorInterface`（数据表达式求值策略注入点）。
-- `src/Expand/CanvasExpander.php` — 展开步骤（渲染前独立纯结构步骤）：`expand(Canvas, dataset): Canvas`，全画布标记字段求值 + 模板表实例化，产出具体树（无模板、无表达式、高度定稿）；实现走 graph 层改写后 `Canvas::fromGraph` 重建，源 graph 永不回写。嵌套模板表 rowsPath 行相对取数。
+- `src/Hydrate/CanvasHydrator.php` — hydrate 步骤的固定编排器（数据填充，渲染前独立纯结构步骤）：`hydrate(Canvas, dataset): Canvas`，全画布标记字段求值 + 模板表实例化，产出具体树（无模板、无表达式、高度定稿）；实现走 graph 层改写后 `Canvas::fromGraph` 重建，源 graph 永不回写。嵌套模板表 rowsPath 行相对取数。更名自「展开 / CanvasExpander」，与 React SSR hydration 无关。
 - `src/Expression/InterpolationEvaluator.php` — 默认求值器：mustache 风格外壳 + 变量点路径子集（`row.` 命名空间/裸名根键/`$index` 自 1 起/`$root`），零依赖；缺字段=空串信号、类型不匹配 fail-fast。三端共享 fixture 只锁默认实现。
-- `src/Exception/` — 错误分类面：`DecodeException`（解码期）/`ExpandException`（展开期）/`MaterializeException`（绘制期），统一承载稳定 code（`getErrorCode()`，spec §5.2 清单），消息 = code 前缀 + 上下文。
+- `src/Exception/` — 错误分类面：`DecodeException`（解码期）/`HydrateException`（填充期）/`MaterializeException`（绘制期），统一承载稳定 code（`getErrorCode()`，spec §5.2 清单），消息 = code 前缀 + 上下文。
 - `src/Renderer/AbstractRenderer.php` — 渲染模板：begin → 遍历图层 instanceof 分派 → 容器递归（坐标偏移栈，全部直画同一渲染面）→ end；后端只实现 `begin/end/drawRect/drawImage/drawText` 五个原语。**渲染器无预遍历**：Image/Text/QrCode 分支开头按需 `resolveLayer` 惰性物化（ADR 0005），失败即抛、渲染面丢弃。**本包不含任何具体后端**。
 - `src/Renderer/PositionResolver.php` — 锚点串 → 父盒内偏移（纯函数，不做钳位，负值即溢出）。
 - `src/ResourceManagers/ResourceResolver.php` — 资源物化：远程图片/字体下载（失败抛 code `resource_download_failed`）、QR 经 endroid 生成 PNG，回写图层 `setResolvedSrc/setResolvedFont`。由渲染器绘制分支按需调用（角色=绘制时物化，非渲染前预遍历）。是核心包的一部分（任何后端都需要它）。
@@ -34,7 +34,7 @@ php -l src/...         # 改动文件语法检查
 ## Rules and gotchas
 
 - **依赖方向单向**：Renderer → Canvas → Layer；结构侧（Canvas/Layer）不得 import 渲染侧与图像库，**核心包 composer require 保持 `php + endroid/qr-code`**——把 intervention 等渲染依赖引回核心是回归。图层 setter 禁止 I/O，物化只发生在 `ResourceResolver`。
-- **标准管线**：`$renderer->render((new CanvasExpander())->expand($canvas, $dataset))`——展开（数据维度，渲染前纯结构）与物化（资源维度，绘制时惰性）两维分离；未绑数据集（null）或无绑定画布，两步均恒等直通。
+- **标准管线**：`$renderer->render((new CanvasHydrator())->hydrate($canvas, $dataset))`——hydrate（数据填充，数据维度，渲染前纯结构）与物化（资源维度，绘制时惰性）两维分离；未绑数据集（null）或无绑定画布，两步均恒等直通。编译入口走 `DefaultCanvasCompiler::compile()`（工票 01 骨架，hydrate → paginate 钉序）。
 - **graph 条件写键（V2 新增面）**：模板态 TableLayer 写 `data`/`template`、不写 `rows`；V1 态恒写 `rows`、不写 `template`/`data`（template ⊕ rows XOR，双键同现 `fromGraph` 抛 `template_rows_conflict`）。表达式标记：TextLayer 恒写三键 data（现状形态），Image/Qr 仅标记态写 `expression` 键（保 Go↔PHP 字节 parity）；`data.value` 恒镜像表达式原文，求值结果永不落 graph。
 - **错误 code 是三端契约**：新增错误必须归入三阶段之一并挂稳定 code（见 `.scratch/table-layer-v2/spec.md` §5.2），消息可改、code 不可改；求值器内部错误（语法等）code 归求值器 spec。
 - **priority 语义**：越大越先渲染（越垫底），与旧库一致。

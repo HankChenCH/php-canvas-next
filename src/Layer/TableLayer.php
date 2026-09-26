@@ -10,8 +10,8 @@ use InvalidArgumentException;
  *
  * V2 模板态（spec §2）：声明 TableRowTemplate + data.rowsPath，
  * 与 rows XOR 互斥——wire 上 template/data 为条件写键（模板态不写 rows，
- * V1 态不写 template/data，字节面保三端 parity）；展开在渲染前的独立
- * 纯结构步骤完成，展开产物不回写本图层（往返恒等对象 = 声明态）
+ * V1 态不写 template/data，字节面保三端 parity）；填充（hydrate）在渲染前的独立
+ * 纯结构步骤完成，填充产物不回写本图层（往返恒等对象 = 声明态）
  */
 class TableLayer extends AbstractLayer
 {
@@ -26,7 +26,7 @@ class TableLayer extends AbstractLayer
 
     private ?TableRowTemplate $template = null;
 
-    /** 取行路径（点路径字符串），仅模板态参与展开（spec §3.3） */
+    /** 取行路径（点路径字符串），仅模板态参与填充（spec §3.3） */
     private string $rowsPath = '';
 
     public function isOverHeight(TableRowLayer $row): bool
@@ -85,8 +85,8 @@ class TableLayer extends AbstractLayer
     }
 
     /**
-     * 取行路径（点路径字符串）：展开时从数据集（嵌套模板表则从当前行数据）
-     * 定位行数组；仅模板态参与展开与 wire 写键（spec §3.3）
+     * 取行路径（点路径字符串）：填充时从数据集（嵌套模板表则从当前行数据）
+     * 定位行数组；仅模板态参与填充与 wire 写键（spec §3.3）
      */
     public function setRowsPath(string $rowsPath): static
     {

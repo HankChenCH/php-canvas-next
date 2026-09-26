@@ -16,7 +16,7 @@ class ImageLayer extends AbstractLayer
 
     /**
      * 数据表达式标记（spec §3.1）：非 null = 已标记（valueType='ExpressionValue'），
-     * src 由展开阶段按行求值；null = 字面直通
+     * src 由填充阶段按行求值；null = 字面直通
      */
     private ?string $expression = null;
 

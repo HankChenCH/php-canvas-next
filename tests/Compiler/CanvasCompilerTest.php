@@ -8,7 +8,7 @@ use HankChen\CanvasNext\Compiler\CompileContext;
 use HankChen\CanvasNext\Compiler\DefaultCanvasCompiler;
 use HankChen\CanvasNext\Compiler\Diagnostic;
 use HankChen\CanvasNext\Contracts\ExpressionEvaluatorInterface;
-use HankChen\CanvasNext\Expand\CanvasExpander;
+use HankChen\CanvasNext\Hydrate\CanvasHydrator;
 use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableCellLayer;
 use HankChen\CanvasNext\Layer\TableRowTemplate;
@@ -17,12 +17,12 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
 
 /**
  * 编译器骨架（spec §2）：compile() 为 final 模板方法，钉死顺序 hydrate → paginate。
- * 直通条件矩阵 + 串联行为；hydrate 委托 CanvasExpander 的深层语义由
- * Expand\CanvasExpanderTest 承担，此处只锁编译面契约
+ * 直通条件矩阵 + 串联行为；hydrate 委托 CanvasHydrator 的深层语义由
+ * Hydrate\CanvasHydratorTest 承担，此处只锁编译面契约
  */
 class CanvasCompilerTest extends CanvasTestCase
 {
-    /** 与 CanvasExpanderTest 同构的最小模板表 fixture（工票 02 统一更名后归并） */
+    /** 与 CanvasHydratorTest 同构的最小模板表 fixture */
     private function templateTable(): TableLayer
     {
         $row = (new TableRowTemplate())->setHeight('auto');
@@ -95,7 +95,7 @@ class CanvasCompilerTest extends CanvasTestCase
 
     public function testEvaluatorInjectionReachesHydrateDelegate(): void
     {
-        // 注入链（spec §3.2）：compiler 构造器 → hydrate 委托（CanvasExpander），
+        // 注入链（spec §3.2）：compiler 构造器 → hydrate 委托（CanvasHydrator），
         // 用户视角只见 compiler 构造器上的 evaluator 参数
         $evaluator = new class implements ExpressionEvaluatorInterface {
             public function evaluate(string $template, array $context): string
@@ -140,7 +140,7 @@ class CanvasCompilerTest extends CanvasTestCase
 
             protected function hydrate(CompileContext $context): Canvas
             {
-                return (new CanvasExpander())->expand($context->canvas, $context->dataset);
+                return (new CanvasHydrator())->hydrate($context->canvas, $context->dataset);
             }
 
             protected function paginate(Canvas $canvas): array
