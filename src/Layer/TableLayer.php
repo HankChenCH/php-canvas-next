@@ -3,6 +3,7 @@
 namespace HankChen\CanvasNext\Layer;
 
 use HankChen\CanvasNext\Exception\DecodeException;
+use InvalidArgumentException;
 
 /**
  * 表格图层：行容器，addRow 时同步行宽
@@ -34,12 +35,13 @@ class TableLayer extends AbstractLayer
     }
 
     /**
-     * @throws DecodeException 模板态下禁止追加具体行（template ⊕ rows 互斥）
+     * @throws InvalidArgumentException 模板态下禁止追加具体行（template ⊕ rows 互斥，
+     *                                   API 误用属调用期错误，不占解码期异常类）
      */
     public function addRow(TableRowLayer $row): static
     {
         if ($this->template !== null) {
-            throw new DecodeException('template_rows_conflict', 'template_rows_conflict: 模板态表格不得追加具体行，请先 setTemplate(null)');
+            throw new InvalidArgumentException('template_rows_conflict: 模板态表格不得追加具体行，请先 setTemplate(null)');
         }
 
         $row->setWidth($this->getWidth());
@@ -103,8 +105,11 @@ class TableLayer extends AbstractLayer
         $graph = parent::graph();
 
         if ($this->template !== null) {
-            // 模板态：条件写键 data/template，不写 rows（XOR，spec §2.2）
-            $graph['data'] = ['rowsPath' => $this->rowsPath];
+            // 模板态：条件写键 data/template，不写 rows（XOR，spec §2.2）；
+            // rowsPath 未设时不写 data 键——不产出违反自身约束的中间 wire 形态
+            if ($this->rowsPath !== '') {
+                $graph['data'] = ['rowsPath' => $this->rowsPath];
+            }
             $graph['template'] = $this->template->graph();
 
             return $graph;

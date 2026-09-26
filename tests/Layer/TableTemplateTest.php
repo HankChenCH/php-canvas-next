@@ -106,7 +106,8 @@ class TableTemplateTest extends CanvasTestCase
     {
         $table = $this->templateTable();
 
-        $this->expectException(DecodeException::class);
+        // API 误用属调用期错误，不占解码期异常类；code 词面保留在消息里供检索
+        $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('template_rows_conflict');
 
         $table->addRow(TableRowLayer::make(320, 'auto'));
@@ -137,6 +138,37 @@ class TableTemplateTest extends CanvasTestCase
         } catch (DecodeException $e) {
             $this->assertSame('rows_path_missing', $e->getErrorCode());
         }
+    }
+
+    public function testTemplateWithoutRowsPathDoesNotWriteDataKey(): void
+    {
+        // API 侧尚未 setRowsPath：不写 data 键（条件写键），fromGraph 即抛 rows_path_missing（fail-fast），
+        // 不产出违反自身约束的中间 wire 形态
+        $table = TableLayer::make(320, 200, '#fff');
+        $table->setTemplate($this->template());
+
+        $graph = $table->graph();
+        $this->assertArrayNotHasKey('data', $graph);
+        $this->assertArrayHasKey('template', $graph);
+
+        try {
+            TableLayer::fromGraph($graph);
+            $this->fail('模板态缺 rowsPath 必须抛错');
+        } catch (DecodeException $e) {
+            $this->assertSame('rows_path_missing', $e->getErrorCode());
+        }
+    }
+
+    public function testZeroCellTemplateIsLegalWire(): void
+    {
+        // §2.6：模板行零格属合法 wire
+        $table = TableLayer::make(320, 200, '#fff');
+        $table->setRowsPath('items');
+        $table->setTemplate((new TableRowTemplate())->setWidth(320)->setHeight('auto'));
+
+        $graph = $table->graph();
+        $this->assertSame([], $graph['template']['cells']);
+        $this->assertSame($graph, TableLayer::fromGraph($graph)->graph());
     }
 
     public function testSetTemplateSyncsRowWidthOnly(): void
