@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /**
  * TableLayer V2 三端共享 fixture 导出（spec §7 / go-canvas 工票 12）。
- * 两个一致性面各一份 JSON，Go 侧 expand 包测试为 runner，canvas-web 适配后可复用：
+ * 两个一致性面各一份 JSON，Go 侧 hydrate 包测试为 runner，canvas-web 适配后可复用：
  *
  * - expression-eval.json（contract: expression-eval v1）
  *   默认求值器（受限插值）语义用例：{name, description, template, context, expect}
@@ -19,9 +19,9 @@ declare(strict_types=1);
  * 用例语义源 = php-canvas-next 单测（tests/Expression + tests/Hydrate）逐用例平移；
  * 导出即自检：PHP 实际行为与 authored 期望不符直接失败，防 fixture 与实现漂移。
  *
- * 用法: php scripts/export-expand-fixtures.php [输出目录]
- * 默认输出到 ../go-canvas/expand/testdata/（JSON 提交进 Go 仓库，
- * 经 go-canvas 的 make expand-fixtures 人工触发再生成；Go CI 不装 PHP）。
+ * 用法: php scripts/export-hydrate-fixtures.php [输出目录]
+ * 默认输出到 ../go-canvas/hydrate/testdata/（JSON 提交进 Go 仓库，
+ * 经 go-canvas 的 make hydrate-fixtures 人工触发再生成；Go CI 不装 PHP）。
  */
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -245,7 +245,7 @@ function nestedTemplateTable(): TableLayer
 }
 
 /** 填充语义用例集。管线 = graph → fromGraph → hydrate；错误码可 authored 自检 */
-function expandCases(): array
+function hydrateCases(): array
 {
     // 用例 graph 一律画布级（Canvas::fromGraph 的输入形态，与 layout-snapshot 同构）
     $mainGraph = Canvas::make(320, 400, fixtureTemplateTable())->graph();
@@ -335,7 +335,7 @@ function expandCases(): array
 }
 
 /** 导出单个填充用例：管线 = graph → fromGraph → hydrate，authored 错误码自检 */
-function exportExpandCase(array $case): array
+function exportHydrateCase(array $case): array
 {
     [$graph, $dataset, $expectedErrorCode, $name, $description] = $case;
 
@@ -366,7 +366,7 @@ function exportExpandCase(array $case): array
 // 输出
 // ---------------------------------------------------------------------------
 
-$outDir = $argv[1] ?? __DIR__ . '/../../go-canvas/expand/testdata';
+$outDir = $argv[1] ?? __DIR__ . '/../../go-canvas/hydrate/testdata';
 if (!is_dir($outDir) && !mkdir($outDir, 0755, true)) {
     fwrite(STDERR, "输出目录不可创建: {$outDir}\n");
     exit(1);
@@ -376,14 +376,14 @@ $documents = [
     'expression-eval.json' => [
         'meta' => [
             'contract' => 'expression-eval v1',
-            'generator' => 'php-canvas-next/scripts/export-expand-fixtures.php',
+            'generator' => 'php-canvas-next/scripts/export-hydrate-fixtures.php',
             'notes' => [
                 '默认求值器（受限插值）语义用例，语义源 php-canvas-next tests/Expression/InterpolationEvaluatorTest.php 逐用例平移；',
                 'context 形状为契约层钉定（spec §3.2）：row 键 = 行命名空间、裸名 = 数据集根键、$index（自 1 起）/$root 保留名；',
                 '缺字段/null = 空串信号（字段类兜底/报错策略由填充器施加）；数组/对象落到标量位 = expression_type_mismatch；',
                 'expect = 求值结果串 | {errorCode}；code 清单见 spec §5.2，三端一致性抓手；',
                 '数值字符串化只锁常规区间（整数/常规小数）；极端浮点（科学计数法阈值）的格式化语义归求值器 spec effort，不入 fixture；',
-                '再生成: go-canvas 仓 make expand-fixtures（需本机 PHP 8.3）',
+                '再生成: go-canvas 仓 make hydrate-fixtures（需本机 PHP 8.3）',
             ],
         ],
         'cases' => array_map('exportExpressionCase', expressionCases()),
@@ -391,17 +391,17 @@ $documents = [
     'expand-semantics.json' => [
         'meta' => [
             'contract' => 'expand-semantics v1',
-            'generator' => 'php-canvas-next/scripts/export-expand-fixtures.php',
+            'generator' => 'php-canvas-next/scripts/export-hydrate-fixtures.php',
             'notes' => [
                 '数据填充（hydrate）语义用例，语义源 php-canvas-next tests/Hydrate/CanvasHydratorTest.php 逐用例平移（另含 QR/嵌套两个扩覆盖用例）；',
-                'runner 管线 = graph → 反序列化重建 → expand(dataset) → graph，与 PHP 导出管线同构（Go: canvas.FromGraph → expand）；',
+                'runner 管线 = graph → 反序列化重建 → hydrate(dataset) → graph，与 PHP 导出管线同构（Go: canvas.FromGraph → hydrate）；',
                 '解码期错误（template_rows_conflict/rows_path_missing）与填充期错误同管线表达，expect = {graph} | {errorCode}（spec §5.2）；',
                 'dataset null = 未绑数据集恒等直通（含模板表）；无标记无模板画布恒等直通；',
                 '填充产物 graph 已含 V1 高度耦合重放结果（行高定稿/固定格内容压平），填充永不回写源 graph；',
-                '再生成: go-canvas 仓 make expand-fixtures（需本机 PHP 8.3）',
+                '再生成: go-canvas 仓 make hydrate-fixtures（需本机 PHP 8.3）',
             ],
         ],
-        'cases' => array_map('exportExpandCase', expandCases()),
+        'cases' => array_map('exportHydrateCase', hydrateCases()),
     ],
 ];
 
