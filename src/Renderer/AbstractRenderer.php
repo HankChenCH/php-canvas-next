@@ -30,11 +30,17 @@ abstract class AbstractRenderer implements RendererInterface
 
     /**
      * 渲染整棵结构树
+     *
+     * 根层渲染循环跳过 visible=false（layer-panel-ux 工单 01 隐藏语义 = 最终输出排除）：
+     * 跳过在绘制分派之前，隐藏层的惰性物化不会发生；容器子层不下钻显隐（显隐面仅根图层）
      */
     final public function render(Canvas $canvas): mixed
     {
         $this->begin($canvas->getWidth(), $canvas->getHeight());
         foreach ($canvas->getLayers() as $layer) {
+            if (!$layer->isVisible()) {
+                continue;
+            }
             $this->paint($layer, 0, 0, $canvas->getWidth(), $canvas->getHeight());
         }
 
@@ -43,6 +49,7 @@ abstract class AbstractRenderer implements RendererInterface
 
     /**
      * 便捷：以图层自身尺寸为渲染面渲染单个图层
+     * （不做显隐过滤——visible 语义属画布渲染循环，单图层渲染所见即所得）
      */
     public function renderLayer(AbstractLayer $layer): mixed
     {

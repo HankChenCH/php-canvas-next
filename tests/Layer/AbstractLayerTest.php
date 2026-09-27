@@ -132,4 +132,77 @@ class AbstractLayerTest extends CanvasTestCase
 
         $this->assertSame($layer->graph(), $rebuilt->graph());
     }
+
+    /**
+     * name/visible 契约（layer-panel-ux 工单 01）：缺省态（name 空、visible true）不写键，
+     * 缺省图层的 graph 与旧版字节面完全一致
+     */
+    public function testNameVisibleDefaultOmitsKeys(): void
+    {
+        $layer = $this->layer();
+
+        $this->assertSame('', $layer->getDisplayName());
+        $this->assertTrue($layer->isVisible());
+
+        $graph = $layer->graph();
+        $this->assertArrayNotHasKey('name', $graph);
+        $this->assertArrayNotHasKey('visible', $graph);
+    }
+
+    /** 条件写键：name 仅非空写、visible 仅 false 写；键序钉在 type 之后、priority 之前 */
+    public function testNameVisibleConditionalKeysAndOrder(): void
+    {
+        $nameOnly = $this->layer()->setDisplayName('标题层')->graph();
+        $this->assertSame(['type', 'name', 'priority', 'spec'], array_keys($nameOnly));
+        $this->assertSame('标题层', $nameOnly['name']);
+
+        $visibleOnly = $this->layer()->setVisible(false)->graph();
+        $this->assertSame(['type', 'visible', 'priority', 'spec'], array_keys($visibleOnly));
+        $this->assertFalse($visibleOnly['visible']);
+
+        $both = $this->layer()->setDisplayName('页眉')->setVisible(false)->graph();
+        $this->assertSame(['type', 'name', 'visible', 'priority', 'spec'], array_keys($both));
+    }
+
+    /** 字节面：带键形态的 JSON 逐字节锁定（Go/TS 按同一键序对齐） */
+    public function testNameVisibleByteFace(): void
+    {
+        $layer = $this->layer()->setDisplayName('标题层')->setVisible(false);
+
+        $this->assertSame(
+            '{"type":"AbstractLayer","name":"标题层","visible":false,"priority":0,'
+            . '"spec":{"shape":{"width":0,"height":0,"autoWidth":false,"autoHeight":false,"lineHeight":1,'
+            . '"padding":{"top":0,"bottom":0,"left":0,"right":0},'
+            . '"border":{"top":null,"bottom":null,"left":null,"right":null},"backgroundColor":null},'
+            . '"align":{"horizontal":"left","vertical":"top"},'
+            . '"position":{"x":0,"y":0,"position":"top-left"}}}',
+            json_encode($layer->graph(), JSON_UNESCAPED_UNICODE)
+        );
+    }
+
+    /** decode 读取 name/visible，graph → 重建 → graph 往返恒等 */
+    public function testNameVisibleFromGraphRoundtrip(): void
+    {
+        $layer = $this->layer()->setDisplayName('页眉')->setVisible(false)->setPriority(3);
+
+        $rebuilt = $layer::fromGraph($layer->graph());
+
+        $this->assertSame('页眉', $rebuilt->getDisplayName());
+        $this->assertFalse($rebuilt->isVisible());
+        $this->assertSame(3, $rebuilt->getPriority());
+        $this->assertSame($layer->graph(), $rebuilt->graph());
+    }
+
+    /** 第三方写入缺省值（name 空、visible true）→ 重建后归一为缺省，再序列化键省略 */
+    public function testNameVisibleNonDefaultWireNormalizedAway(): void
+    {
+        $graph = ['name' => '', 'visible' => true] + $this->layer()->graph();
+
+        $rebuilt = $this->layer()::fromGraph($graph);
+
+        $this->assertSame('', $rebuilt->getDisplayName());
+        $this->assertTrue($rebuilt->isVisible());
+        $this->assertArrayNotHasKey('name', $rebuilt->graph());
+        $this->assertArrayNotHasKey('visible', $rebuilt->graph());
+    }
 }

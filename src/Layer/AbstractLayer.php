@@ -17,6 +17,15 @@ abstract class AbstractLayer
 
     protected string $name = self::TYPE;
 
+    /**
+     * 用户命名（wire 键 name，layer-panel-ux 工单 01）：与 $name（type 标识）无关，
+     * 缺省空串且序列化键省略（仅非空写键，保往返恒等）
+     */
+    protected string $displayName = '';
+
+    /** 显隐设定（wire 键 visible）：缺省 true 且序列化键省略（仅 false 写键）；渲染循环跳过 false 的根图层 */
+    protected bool $visible = true;
+
     protected int $width = 0;
     protected int $height = 0;
     protected bool $autoWidth = false;
@@ -108,17 +117,33 @@ abstract class AbstractLayer
         if (isset($graph['priority'])) {
             $this->setPriority((int) $graph['priority']);
         }
+
+        // name/visible（layer-panel-ux 工单 01）：isset 门与 PHP 语义一致——null 不算在场，
+        // 缺省值形态（空串 name、true visible）合法但序列化侧会归一省略
+        if (isset($graph['name'])) {
+            $this->displayName = (string) $graph['name'];
+        }
+        if (isset($graph['visible'])) {
+            $this->visible = (bool) $graph['visible'];
+        }
     }
 
     /**
-     * 序列化为结构树节点：type/spec（形状、对齐、位置）/data（业务数据，子类补充）
+     * 序列化为结构树节点：type/name?/visible?/priority/spec（形状、对齐、位置）/data（业务数据，子类补充）。
+     * 键省略契约：name 仅非空写键、visible 仅 false 写键——缺省态字节面与无字段版本一致，
+     * graph → fromGraph → graph 往返恒等不受扰动
      */
     public function graph(): array
     {
-        return [
-            'type' => $this->name,
-            'priority' => $this->priority,
-            'spec' => [
+        $graph = ['type' => $this->name];
+        if ($this->displayName !== '') {
+            $graph['name'] = $this->displayName;
+        }
+        if (!$this->visible) {
+            $graph['visible'] = false;
+        }
+        $graph['priority'] = $this->priority;
+        $graph['spec'] = [
                 'shape' => [
                     'width' => $this->width,
                     'height' => $this->height,
@@ -138,8 +163,9 @@ abstract class AbstractLayer
                     'y' => $this->y,
                     'position' => $this->position,
                 ],
-            ],
         ];
+
+        return $graph;
     }
 
     public function setWidth(int|string $width): static
@@ -358,5 +384,31 @@ abstract class AbstractLayer
     public function getPriority(): int
     {
         return $this->priority;
+    }
+
+    /** 用户命名（wire 键 name）；缺省空串 = 未命名，序列化键省略 */
+    public function setDisplayName(string $displayName): static
+    {
+        $this->displayName = $displayName;
+
+        return $this;
+    }
+
+    public function getDisplayName(): string
+    {
+        return $this->displayName;
+    }
+
+    /** 显隐设定（wire 键 visible）；false 时渲染循环跳过该根图层 */
+    public function setVisible(bool $visible): static
+    {
+        $this->visible = $visible;
+
+        return $this;
+    }
+
+    public function isVisible(): bool
+    {
+        return $this->visible;
     }
 }

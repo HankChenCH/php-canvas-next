@@ -148,6 +148,11 @@ function exportCase(string $name, string $description, Canvas $canvas): array
 
     $textLayers = [];
     foreach ($canvas->getLayers() as $rootLayer) {
+        // 契约:visible=false 的根图层渲染跳过(layer-panel-ux 工单 01),不产生绘制记录,
+        // 文本标注收集须与渲染模板同门(容器子层无显隐语义,不下钻过滤)
+        if (!$rootLayer->isVisible()) {
+            continue;
+        }
         collectTextLayers($rootLayer, $textLayers);
     }
 
@@ -247,7 +252,40 @@ function buildCases(): array
             . ' + 表达式标记（Text 恒写 expression 三键 / Image 条件两键）；模板态渲染 = 空壳（表壳按声明画，行区零高），V1 具体行表同画布对照',
             buildTemplateWire()
         ),
+        exportCase(
+            'name-visible-contract',
+            '图层 name/visible 契约（layer-panel-ux 工单 01）：name 仅非空写键、visible 仅 false 写键，'
+            . '缺省图层字节面与无字段版本一致；hidden 根层渲染跳过（不产生绘制记录），named+hidden 与'
+            . ' named+visible 与无名默认三层对照',
+            buildNameVisibleContract()
+        ),
     ];
+}
+
+/**
+ * name/visible 契约用例（layer-panel-ux 工单 01）：同画布三层对照——
+ * named+visible（name 键在场）、named+hidden（name + visible:false 双键、渲染跳过）、
+ * 无名默认（两键均省略）。空引用图片层零物化只画盒
+ */
+function buildNameVisibleContract(): Canvas
+{
+    $namedVisible = TextLayer::make(80, 24)
+        ->setText('named visible')
+        ->setFont('', 12, '#000000')
+        ->setDisplayName('标题层')
+        ->setPosition(0, 0);
+
+    $namedHidden = ImageLayer::make(60, 40, '#ff0000')
+        ->setDisplayName('隐藏图')
+        ->setVisible(false)
+        ->setPosition(0, 40);
+
+    $plain = (new QrCodeLayer())
+        ->setWidth(40)
+        ->setHeight(24)
+        ->setPosition(100, 0);
+
+    return Canvas::make(160, 80, $namedVisible, $namedHidden, $plain);
 }
 
 /**
