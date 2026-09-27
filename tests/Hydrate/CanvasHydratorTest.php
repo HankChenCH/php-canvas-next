@@ -3,6 +3,8 @@
 namespace HankChen\CanvasNext\Tests\Hydrate;
 
 use HankChen\CanvasNext\Canvas;
+use HankChen\CanvasNext\Compiler\Diagnostic;
+use HankChen\CanvasNext\Compiler\DiagnosticCollector;
 use HankChen\CanvasNext\Exception\HydrateException;
 use HankChen\CanvasNext\Hydrate\CanvasHydrator;
 use HankChen\CanvasNext\Layer\ImageLayer;
@@ -303,5 +305,83 @@ class CanvasHydratorTest extends CanvasTestCase
         } catch (HydrateException $e) {
             $this->assertSame('expression_type_mismatch', $e->getErrorCode());
         }
+    }
+
+    /** 文案标记整串落空的最小模板表 fixture（工票 04：{{row.missing}} 在行上下文兜底空串） */
+    private function fallbackTemplateTable(): TableLayer
+    {
+        $row = (new TableRowTemplate())->setHeight('auto');
+        $textCell = (new TableCellLayer())->setWidth(160)->setHeight('auto');
+        $textCell->addTemplateContentLayer(
+            TextLayer::make(160, 'auto')->setExpression('{{row.missing}}')->setFont('', 12, '#000')
+        );
+        $row->addCell($textCell);
+
+        $table = TableLayer::make(320, 200, '#fff');
+        $table->setRowsPath('order.items');
+        $table->setTemplate($row);
+
+        return $table;
+    }
+
+    public function testTextFallbackEmitsDiagnosticIntoCollector(): void
+    {
+        // 工票 04 / spec §3.3：文案类兜底空串（策略性软失败）经收集器发射 Diagnostic，
+        // 求值边界协议不变（缺字段信号 = 空串），兜底行为本身零变化
+        $collector = new DiagnosticCollector();
+        $canvas = Canvas::make(
+            320,
+            400,
+            $this->fallbackTemplateTable(),
+            TextLayer::make(160, 30)->setExpression('{{missingRoot}}')->setFont('', 12, '#000')
+        );
+
+        $hydrated = $this->hydrator->hydrate($canvas, ['order' => ['items' => [['name' => '张三']]]], $collector);
+
+        // 兜底行为不变：产物仍是无标记的具体树
+        /** @var TableLayer $table */
+        $table = $hydrated->getLayers()[0];
+        /** @var TextLayer $rowText */
+        $rowText = $table->getRows()[0]->getCells()[0]->getContentLayer();
+        $this->assertSame('', $rowText->getText());
+        /** @var TextLayer $rootText */
+        $rootText = $hydrated->getLayers()[1];
+        $this->assertSame('', $rootText->getText());
+
+        // 每次兜底恰一条诊断：带表达式原文与定位路径（行内 = 实例化后路径）
+        $warnings = $collector->all();
+        $this->assertCount(2, $warnings);
+        $this->assertContainsOnlyInstancesOf(Diagnostic::class, $warnings);
+
+        $this->assertSame('expression_fallback_empty', $warnings[0]->code);
+        $this->assertStringContainsString('{{row.missing}}', $warnings[0]->message);
+        $this->assertSame('layers[0].rows[0].cells[0].content.data.value', $warnings[0]->path);
+
+        $this->assertSame('expression_fallback_empty', $warnings[1]->code);
+        $this->assertStringContainsString('{{missingRoot}}', $warnings[1]->message);
+        $this->assertSame('layers[1].data.value', $warnings[1]->path);
+    }
+
+    public function testCollectorUntouchedWhenDatasetUnbound(): void
+    {
+        // 未绑数据集：不跑求值器，全画布恒等直通，收集器恒空
+        $collector = new DiagnosticCollector();
+        $canvas = Canvas::make(320, 400, $this->fallbackTemplateTable());
+
+        $this->hydrator->hydrate($canvas, null, $collector);
+
+        $this->assertSame([], $collector->all());
+    }
+
+    public function testCollectorUntouchedWithoutBindings(): void
+    {
+        // 无标记无模板：已绑数据集也恒等直通（存量文案里的字面 {{ 不误伤），收集器恒空
+        $collector = new DiagnosticCollector();
+        $canvas = Canvas::make(320, 100, TextLayer::make(200, 30)->setText('字面 {{orderNo}} 文案'));
+
+        $hydrated = $this->hydrator->hydrate($canvas, ['orderNo' => 'A2026-001'], $collector);
+
+        $this->assertSame($canvas, $hydrated);
+        $this->assertSame([], $collector->all());
     }
 }

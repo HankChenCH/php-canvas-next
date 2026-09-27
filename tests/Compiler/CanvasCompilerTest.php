@@ -8,7 +8,9 @@ use HankChen\CanvasNext\Compiler\CompileContext;
 use HankChen\CanvasNext\Compiler\DefaultCanvasCompiler;
 use HankChen\CanvasNext\Compiler\Diagnostic;
 use HankChen\CanvasNext\Contracts\ExpressionEvaluatorInterface;
+use HankChen\CanvasNext\Exception\HydrateException;
 use HankChen\CanvasNext\Hydrate\CanvasHydrator;
+use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableCellLayer;
 use HankChen\CanvasNext\Layer\TableRowTemplate;
@@ -213,5 +215,79 @@ class CanvasCompilerTest extends CanvasTestCase
         $this->assertSame('字段求值落空，兜底空串', $diagnostic->message);
         $this->assertSame('layers.0', $diagnostic->path);
         $this->assertNull((new Diagnostic('code', 'message'))->path);
+    }
+
+    /** 文案标记整串落空的最小模板表 fixture（工票 04 验收：{{row.missing}} + 已绑数据集） */
+    private function fallbackTemplateTable(): TableLayer
+    {
+        $row = (new TableRowTemplate())->setHeight('auto');
+
+        $textCell = (new TableCellLayer())->setWidth(160)->setHeight('auto');
+        $textCell->addTemplateContentLayer(
+            TextLayer::make(160, 'auto')->setExpression('{{row.missing}}')->setFont('', 12, '#000')
+        );
+        $row->addCell($textCell);
+
+        $table = TableLayer::make(320, 200, '#fff');
+        $table->setRowsPath('order.items');
+        $table->setTemplate($row);
+
+        return $table;
+    }
+
+    private function fallbackDataset(): array
+    {
+        return ['order' => ['items' => [['name' => '张三']]]];
+    }
+
+    public function testTextFallbackEmptyEmitsExpressionFallbackWarning(): void
+    {
+        // 工票 04 / spec §3.3：文案类求值空串兜底（策略性软失败）发射 Diagnostic，
+        // 编译仍成功，产物与现状行为字节等价
+        $result = (new DefaultCanvasCompiler())
+            ->compile(Canvas::make(320, 400, $this->fallbackTemplateTable()), $this->fallbackDataset());
+
+        $this->assertCount(1, $result->canvases);
+        /** @var TableLayer $table */
+        $table = $result->canvases[0]->getLayers()[0];
+        $this->assertCount(1, $table->getRows());
+
+        /** @var TextLayer $text */
+        $text = $table->getRows()[0]->getCells()[0]->getContentLayer();
+        $this->assertSame('', $text->getText());
+
+        // 产物字节等价：整层序列化与字面构造的静态文案层逐键一致（兜底空串落 value，解除标记）
+        $this->assertSame(
+            TextLayer::make(160, 'auto')->setText('')->setFont('', 12, '#000')->graph(),
+            $text->graph()
+        );
+
+        // warnings 恰含一条：带表达式原文与定位路径
+        $this->assertCount(1, $result->warnings);
+        $warning = $result->warnings[0];
+        $this->assertInstanceOf(Diagnostic::class, $warning);
+        $this->assertSame('expression_fallback_empty', $warning->code);
+        $this->assertStringContainsString('{{row.missing}}', $warning->message);
+        $this->assertSame('layers[0].rows[0].cells[0].content.data.value', $warning->path);
+    }
+
+    public function testResourceEmptyStillFailsFastWithoutResultEscape(): void
+    {
+        // 资源类缺字段 fail-fast 不变：expression_empty_resource 抛出，无 CompileResult 逃逸
+        $row = (new TableRowTemplate())->setHeight('auto');
+        $imageCell = (new TableCellLayer())->setWidth(160)->setHeight(40);
+        $imageCell->addTemplateContentLayer(ImageLayer::make(160, 'auto')->setExpression('{{row.avatar}}'));
+        $row->addCell($imageCell);
+
+        $table = TableLayer::make(320, 200, '#fff');
+        $table->setRowsPath('order.items');
+        $table->setTemplate($row);
+
+        try {
+            (new DefaultCanvasCompiler())->compile(Canvas::make(320, 400, $table), $this->fallbackDataset());
+            $this->fail('资源类空串必须抛 expression_empty_resource');
+        } catch (HydrateException $e) {
+            $this->assertSame('expression_empty_resource', $e->getErrorCode());
+        }
     }
 }

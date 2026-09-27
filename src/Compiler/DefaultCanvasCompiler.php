@@ -16,6 +16,7 @@ final class DefaultCanvasCompiler extends CanvasCompiler
 {
     protected function hydrate(CompileContext $context): Canvas
     {
-        return (new CanvasHydrator($this->evaluator))->hydrate($context->canvas, $context->dataset);
+        return (new CanvasHydrator($this->evaluator))
+            ->hydrate($context->canvas, $context->dataset, $context->warnings);
     }
 }

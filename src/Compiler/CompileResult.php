@@ -11,7 +11,7 @@ final class CompileResult
 {
     /**
      * @param list<Canvas> $canvases 分页后的页序列（未启用分页 = 单元素）
-     * @param list<Diagnostic> $warnings 软诊断（骨架阶段恒空，发射面随工票 04）
+     * @param list<Diagnostic> $warnings 软诊断（现仅 hydrate 文案兜底警告，spec §3.3）
      */
     public function __construct(
         public readonly array $canvases,

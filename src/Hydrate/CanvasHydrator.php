@@ -3,6 +3,8 @@
 namespace HankChen\CanvasNext\Hydrate;
 
 use HankChen\CanvasNext\Canvas;
+use HankChen\CanvasNext\Compiler\Diagnostic;
+use HankChen\CanvasNext\Compiler\DiagnosticCollector;
 use HankChen\CanvasNext\Contracts\ExpressionEvaluatorInterface;
 use HankChen\CanvasNext\Exception\HydrateException;
 use HankChen\CanvasNext\Expression\InterpolationEvaluator;
@@ -18,6 +20,8 @@ use HankChen\CanvasNext\Layer\TextLayer;
  *
  * - 全画布标记字段求值（valueType 门控；独立图层 = 根上下文，行循环 = 行上下文）
  * - 模板表实例化（rowsPath 取行 → 逐行求值 → V1 高度耦合重放，宽在声明态同步、高在此定稿）
+ * - 文案类兜底空串发射软诊断 expression_fallback_empty（spec §3.3），经 DiagnosticCollector
+ *   汇入 CompileResult.warnings；资源类 fail-fast 报错不变
  * - 产出具体树：无模板、无表达式、高度定稿；求值结果永不回写源 graph
  *
  * 数据集裁决（spec 未定义态的裁定）：dataset === null = 未绑数据集，全画布恒等直通——
@@ -39,7 +43,11 @@ class CanvasHydrator
         $this->evaluator ??= new InterpolationEvaluator();
     }
 
-    public function hydrate(Canvas $canvas, mixed $dataset): Canvas
+    /**
+     * @param DiagnosticCollector|null $warnings 软诊断收集通道（spec §3.3，仅文案类兜底发射）；
+     *   null = 静默兜底——独立管线用法 render(hydrate(...)) 行为与历史零变化
+     */
+    public function hydrate(Canvas $canvas, mixed $dataset, ?DiagnosticCollector $warnings = null): Canvas
     {
         // 未绑数据集：不跑求值器，全字面（标记字段按 value 镜像显示原文），存量行为零变化
         if ($dataset === null) {
@@ -54,8 +62,8 @@ class CanvasHydrator
         $root = $this->normalizeDataset($dataset);
         $this->assertReservedRootKeys($root);
 
-        foreach ($graph['layers'] as &$node) {
-            $this->hydrateNode($node, $root, null);
+        foreach ($graph['layers'] as $i => &$node) {
+            $this->hydrateNode($node, $root, null, sprintf('layers[%d]', $i), $warnings);
         }
         unset($node);
 
@@ -97,28 +105,29 @@ class CanvasHydrator
      * 填充单个 graph 节点：求值标记字段 + 结构子树递归（行/格/内容同作用域传递）
      *
      * @param array|null $rowNamespace 行上下文（'row' + '$index'），null = 非行上下文
+     * @param string $path 节点在产物树中的定位路径（诊断发射用），如 layers[0].rows[1].cells[0]
      */
-    private function hydrateNode(array &$node, array $root, ?array $rowNamespace): void
+    private function hydrateNode(array &$node, array $root, ?array $rowNamespace, string $path, ?DiagnosticCollector $warnings): void
     {
         if (($node['type'] ?? '') === 'TableLayer'
             && isset($node['template']) && is_array($node['template'])) {
-            $this->hydrateTemplateNode($node, $root, $rowNamespace);
+            $this->hydrateTemplateNode($node, $root, $rowNamespace, $path, $warnings);
 
             return;
         }
 
-        $this->evaluateNode($node, $root, $rowNamespace);
+        $this->evaluateNode($node, $root, $rowNamespace, $path, $warnings);
 
         foreach (['rows', 'cells'] as $childrenKey) {
             if (isset($node[$childrenKey]) && is_array($node[$childrenKey])) {
-                foreach ($node[$childrenKey] as &$child) {
-                    $this->hydrateNode($child, $root, $rowNamespace);
+                foreach ($node[$childrenKey] as $index => &$child) {
+                    $this->hydrateNode($child, $root, $rowNamespace, sprintf('%s.%s[%d]', $path, $childrenKey, $index), $warnings);
                 }
                 unset($child);
             }
         }
         if (isset($node['content']) && is_array($node['content'])) {
-            $this->hydrateNode($node['content'], $root, $rowNamespace);
+            $this->hydrateNode($node['content'], $root, $rowNamespace, $path . '.content', $warnings);
         }
     }
 
@@ -126,7 +135,7 @@ class CanvasHydrator
      * 模板表实例化：rowsPath 定位行数组 → 每行求值 → 模板行改写为具体行。
      * 行高定稿由 Canvas::fromGraph 的 V1 耦合重放完成（声明态豁免在此闭环）
      */
-    private function hydrateTemplateNode(array &$node, array $root, ?array $rowNamespace): void
+    private function hydrateTemplateNode(array &$node, array $root, ?array $rowNamespace, string $path, ?DiagnosticCollector $warnings): void
     {
         $rowsPath = $node['data']['rowsPath'] ?? null;
         if (!is_string($rowsPath) || $rowsPath === '') {
@@ -150,7 +159,8 @@ class CanvasHydrator
         $serial = 0;
         foreach ($rows as $item) {
             $rowNode = $template;
-            $this->hydrateNode($rowNode, $root, ['row' => $item, '$index' => ++$serial]);
+            // 实例路径 = 产物树落位（填充期间实例尚未追加，追加序 = instances 当前长度）
+            $this->hydrateNode($rowNode, $root, ['row' => $item, '$index' => ++$serial], $path . '.rows[' . count($instances) . ']', $warnings);
             $rowNode['type'] = TableRowLayer::TYPE;
             $instances[] = $rowNode;
         }
@@ -161,9 +171,10 @@ class CanvasHydrator
 
     /**
      * 标记字段求值：求值结果替换为字面值并解除标记（填充产物无表达式）。
-     * 缺字段信号（空串）由本层按字段类施加策略：文案兜底空串、资源类报错
+     * 缺字段信号（空串）由本层按字段类施加策略：文案兜底空串、资源类报错；
+     * 文案兜底发生时经收集器发射软诊断（spec §3.3），兜底行为本身零变化
      */
-    private function evaluateNode(array &$node, array $root, ?array $rowNamespace): void
+    private function evaluateNode(array &$node, array $root, ?array $rowNamespace, string $path, ?DiagnosticCollector $warnings): void
     {
         $data = $node['data'] ?? null;
         if (!is_array($data)
@@ -183,6 +194,15 @@ class CanvasHydrator
         if (($type === ImageLayer::TYPE || $type === QrCodeLayer::TYPE) && $result === '') {
             // 资源类缺字段/null/求值空串一律报错：空 URL/空码无意义，fail-fast 优于错误后移到物化
             throw new HydrateException('expression_empty_resource', "expression_empty_resource: {$data['expression']}");
+        }
+
+        if ($type === TextLayer::TYPE && $result === '') {
+            // 文案类策略性软失败（spec §3.3）：兜底照旧，发射观测诊断（含表达式原文与定位）
+            $warnings?->collect(new Diagnostic(
+                'expression_fallback_empty',
+                "文案表达式 {$data['expression']} 求值为空串，已兜底为空",
+                $path . '.data.value',
+            ));
         }
 
         $data['value'] = $result;

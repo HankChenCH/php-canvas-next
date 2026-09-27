@@ -34,14 +34,15 @@ abstract class CanvasCompiler
     }
 
     /**
-     * 编译入口（final 模板方法）：hydrate → paginate，顺序不可被子类重排
+     * 编译入口（final 模板方法）：hydrate → paginate，顺序不可被子类重排。
+     * 各步骤经 CompileContext.warnings 发射的软诊断在出口汇入 CompileResult
      */
     final public function compile(Canvas $canvas, mixed $dataset): CompileResult
     {
         $context = new CompileContext($canvas, $dataset, $this->paginateOptions);
         $pages = $this->paginate($this->hydrate($context));
 
-        return new CompileResult($pages, []);
+        return new CompileResult($pages, $context->warnings->all());
     }
 
     /**
