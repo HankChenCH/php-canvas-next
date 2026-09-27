@@ -22,7 +22,11 @@ abstract class CanvasCompiler
 {
     protected ExpressionEvaluatorInterface $evaluator;
 
-    /** 分页选项占位（spec §4.2 待钉稿，工票 05/06 定稿后收敛为专门类型） */
+    /**
+     * 分页选项（spec §4.2 钉稿，键义见 CanvasPaginator::fromOptions）：
+     * pageHeight（正整数像素；缺省 = 未启用分页）与 truncate（bool，默认 false）。
+     * 载体维持数组（CompileContext.options 封闭通道）；CanvasPaginator 即页几何/截断的类型化承载
+     */
     protected readonly array $paginateOptions;
 
     public function __construct(

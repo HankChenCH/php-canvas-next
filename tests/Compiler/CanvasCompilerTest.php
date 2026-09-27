@@ -9,10 +9,12 @@ use HankChen\CanvasNext\Compiler\DefaultCanvasCompiler;
 use HankChen\CanvasNext\Compiler\Diagnostic;
 use HankChen\CanvasNext\Contracts\ExpressionEvaluatorInterface;
 use HankChen\CanvasNext\Exception\HydrateException;
+use HankChen\CanvasNext\Exception\PaginateException;
 use HankChen\CanvasNext\Hydrate\CanvasHydrator;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableCellLayer;
+use HankChen\CanvasNext\Layer\TableRowLayer;
 use HankChen\CanvasNext\Layer\TableRowTemplate;
 use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
@@ -288,6 +290,56 @@ class CanvasCompilerTest extends CanvasTestCase
             $this->fail('资源类空串必须抛 expression_empty_resource');
         } catch (HydrateException $e) {
             $this->assertSame('expression_empty_resource', $e->getErrorCode());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // paginate hook 接线（工票 06）：paginateOptions 承载页几何与截断选项
+    // ------------------------------------------------------------------
+
+    /** 固定行高 V1 表（无绑定，hydrate 恒等直通，分页语义单变量可测）：行高 150+50+100+100 */
+    private function fixedRowTable(): TableLayer
+    {
+        $table = TableLayer::make(320, 400, '#fff');
+        $table->setPosition(0, 50);
+        foreach ([150, 50, 100, 100] as $i => $height) {
+            $cell = TableCellLayer::make(320, $height);
+            $cell->addContentLayer(TextLayer::make(320, $height)->setText('行' . ($i + 1)));
+            $table->addRow(TableRowLayer::make(320, $height)->addCell($cell));
+        }
+
+        return $table;
+    }
+
+    public function testPaginateOptionsDrivePageSplittingThroughCompile(): void
+    {
+        // 分页开：页高 250、表顶 y=50 → 可用区 200，行装箱切两页（spec §4.2.2）
+        $result = (new DefaultCanvasCompiler(paginateOptions: ['pageHeight' => 250]))
+            ->compile(Canvas::make(320, 450, $this->fixedRowTable()), null);
+
+        $this->assertCount(2, $result->canvases);
+        foreach ($result->canvases as $page) {
+            $this->assertSame(320, $page->getWidth());
+            $this->assertSame(250, $page->getHeight());
+        }
+
+        // 页 1 行归属：可用区 200 装 行1(150)+行2(50)，行3 开新页
+        /** @var TableLayer $page0Table */
+        $page0Table = $result->canvases[0]->getLayers()[0];
+        $this->assertCount(2, $page0Table->getRows());
+        /** @var TableLayer $page1Table */
+        $page1Table = $result->canvases[1]->getLayers()[0];
+        $this->assertCount(2, $page1Table->getRows());
+    }
+
+    public function testInvalidPageGeometryFailsAtCompilerConstruction(): void
+    {
+        // page_geometry_invalid 构造期 fail-fast：编译器构造（经 fromOptions 建 Paginator）即抛
+        try {
+            new DefaultCanvasCompiler(paginateOptions: ['pageHeight' => 0]);
+            $this->fail('pageHeight ≤ 0 必须在构造期抛 page_geometry_invalid');
+        } catch (PaginateException $e) {
+            $this->assertSame('page_geometry_invalid', $e->getErrorCode());
         }
     }
 }
