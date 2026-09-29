@@ -176,18 +176,35 @@ class DocumentCompilerTest extends CanvasTestCase
         (new DocumentCompiler())->compile([], ['orderNo' => 'A2026-001']);
     }
 
-    public function testNonEmptyFlowChainRejectedUntilTicketEleven(): void
+    public function testNonEmptyFlowChainTakesFlowPath(): void
     {
-        // flowChain 非空路径随工票 11 接入（spec §10.1：入口形状一次到位，实现可先拒绝）：
-        // 当前显式拒绝而非静默忽略——静默会把流语义偷换成逐帧全量填充
-        $canvas = Canvas::make(320, 100, TextLayer::make(200, 30)->setText('x'));
+        // flowChain 非空路径随工票 11 接入（spec §10.3）：单帧 paged 链 = 按帧高分页的
+        // 表达位（spec §10.6）。产物行序列与无流编译语义一致（回写重建后字节面含
+        // V1 耦合重放的一次性钉稿，故断言结构而非字节——见工票 10 Comments）
+        $row = (new TableRowTemplate())->setHeight('auto');
+        $cell = (new TableCellLayer())->setWidth(320)->setHeight('auto');
+        $cell->addTemplateContentLayer(
+            TextLayer::make(320, 'auto')->setExpression('{{$index}}')->setFont('', 12, '#000')
+        );
+        $row->addCell($cell);
+        $table = TableLayer::make(320, 120, '#fff');
+        $table->setRowsPath('items');
+        $table->setTemplate($row);
+        $canvas = Canvas::make(320, 200, $table);
 
-        try {
-            (new DocumentCompiler())->compile([$canvas], null, [['frame' => 0, 'mode' => 'paged']]);
-            $this->fail('flowChain 非空必须拒绝（工票 11 接入流装箱）');
-        } catch (\InvalidArgumentException $e) {
-            $this->assertStringContainsString('flow_chain_unsupported', $e->getMessage());
-        }
+        $result = (new DocumentCompiler())->compile(
+            [$canvas],
+            ['items' => [['name' => 'a'], ['name' => 'b']]],
+            [['frame' => 0, 'mode' => 'paged']]
+        );
+
+        $this->assertCount(1, $result->canvases);
+        /** @var TableLayer $productTable */
+        $productTable = $result->canvases[0]->getLayers()[0];
+        $this->assertCount(2, $productTable->getRows());
+        $this->assertNull($productTable->getTemplate());
+        $this->assertSame(200, $result->canvases[0]->getHeight()); // paged 页高 = 帧画布高
+        $this->assertSame([], $result->warnings);
     }
 
     // ------------------------------------------------------------------

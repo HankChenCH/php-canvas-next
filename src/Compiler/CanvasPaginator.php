@@ -154,11 +154,12 @@ class CanvasPaginator
         $available = $this->pageHeight - $this->shellTopOnPage($tableGraph, $canvas->getWidth());
 
         // 行装箱：行保序、不切开、无跨页合并；装不下整行即开新页，页数 = 装箱结果不预设
+        // （行高读取与流装箱同源：TableGeometry::rowHeight，spec §10.3 防数学漂移）
         $pageRowIndexes = [];
         $current = [];
         $currentHeight = 0;
         foreach ($rowGraphs as $j => $rowGraph) {
-            $rowHeight = (int) ($rowGraph['spec']['shape']['height'] ?? 0);
+            $rowHeight = TableGeometry::rowHeight($rowGraph);
 
             if ($rowHeight > $available) {
                 // 唯一残余溢出 = 单行高 > 单页可用区（spec §4.2.3）：默认报错，截断开则独占一页
@@ -220,21 +221,11 @@ class CanvasPaginator
 
     /**
      * 驱动表壳在页上的顶 y：锚点按页画布解析（页宽 = 源画布宽、页高 = pageHeight），
-     * 与该页渲染期 paint 的锚点解析基准一致；每页可用区同构（spec §4.2.2）
+     * 与该页渲染期 paint 的锚点解析基准一致；每页可用区同构（spec §4.2.2）。
+     * 数学委托 TableGeometry::shellTop 共享实现（流装箱 FrameCapacity 同源，spec §10.3）
      */
     private function shellTopOnPage(array $tableGraph, int $pageWidth): int
     {
-        $shape = $tableGraph['spec']['shape'] ?? [];
-        $position = $tableGraph['spec']['position'] ?? [];
-
-        [, $anchorY] = PositionResolver::resolve(
-            (string) ($position['position'] ?? 'top-left'),
-            $pageWidth,
-            $this->pageHeight,
-            (int) ($shape['width'] ?? 0),
-            (int) ($shape['height'] ?? 0)
-        );
-
-        return $anchorY + (int) ($position['y'] ?? 0);
+        return TableGeometry::shellTop($tableGraph, $pageWidth, $this->pageHeight);
     }
 }
