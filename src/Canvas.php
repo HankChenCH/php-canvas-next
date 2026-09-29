@@ -7,7 +7,7 @@ use HankChen\CanvasNext\Layer\LayerFactory;
 
 /**
  * 画布：纯结构容器（尺寸 + 有序图层），不含任何渲染状态。
- * 渲染交给各 Renderer 后端：$renderer->render($canvas)
+ * 渲染交给各 Renderer 后端：$renderer->render(new NullCancellation(), $canvas)
  */
 class Canvas
 {

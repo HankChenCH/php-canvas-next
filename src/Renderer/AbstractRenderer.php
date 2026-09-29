@@ -12,6 +12,7 @@ use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableRowLayer;
 use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
+use HankChen\CanvasNext\Runtime\Cancellation;
 use InvalidArgumentException;
 
 /**
@@ -21,6 +22,9 @@ use InvalidArgumentException;
  * 绘制原语（drawRect/drawImage/drawText）由具体后端实现。
  * 资源物化（spec §4.3）：渲染器无预遍历，绘制分派前按需惰性物化——
  * 失败即抛、渲染面丢弃、无产物逃逸（begin 已开的渲染面随异常丢弃）
+ *
+ * 渲染期控制面（ADR 0008）：$ctx 以显式首参随调用向下穿线（paint* 与 Go 同位），
+ * 检查点轮询 throwIfRequested()——根层循环每图层前、paintTable 行循环每行前
  */
 abstract class AbstractRenderer implements RendererInterface
 {
@@ -34,14 +38,16 @@ abstract class AbstractRenderer implements RendererInterface
      * 根层渲染循环跳过 visible=false（layer-panel-ux 工单 01 隐藏语义 = 最终输出排除）：
      * 跳过在绘制分派之前，隐藏层的惰性物化不会发生；容器子层不下钻显隐（显隐面仅根图层）
      */
-    final public function render(Canvas $canvas): mixed
+    final public function render(Cancellation $ctx, Canvas $canvas): mixed
     {
         $this->begin($canvas->getWidth(), $canvas->getHeight());
         foreach ($canvas->getLayers() as $layer) {
+            // 根层循环检查点：每图层分派前轮询取消信号
+            $ctx->throwIfRequested();
             if (!$layer->isVisible()) {
                 continue;
             }
-            $this->paint($layer, 0, 0, $canvas->getWidth(), $canvas->getHeight());
+            $this->paint($ctx, $layer, 0, 0, $canvas->getWidth(), $canvas->getHeight());
         }
 
         return $this->end();
@@ -51,10 +57,10 @@ abstract class AbstractRenderer implements RendererInterface
      * 便捷：以图层自身尺寸为渲染面渲染单个图层
      * （不做显隐过滤——visible 语义属画布渲染循环，单图层渲染所见即所得）
      */
-    public function renderLayer(AbstractLayer $layer): mixed
+    public function renderLayer(Cancellation $ctx, AbstractLayer $layer): mixed
     {
         $this->begin($layer->getWidth(), $layer->getHeight());
-        $this->paint($layer, 0, 0, $layer->getWidth(), $layer->getHeight());
+        $this->paint($ctx, $layer, 0, 0, $layer->getWidth(), $layer->getHeight());
 
         return $this->end();
     }
@@ -63,7 +69,7 @@ abstract class AbstractRenderer implements RendererInterface
      * 在绝对坐标 (originX, originY) 处按图层自身定位设定绘制
      * （锚点相对 parentWidth×parentHeight 解析）
      */
-    private function paint(AbstractLayer $layer, int $originX, int $originY, int $parentWidth, int $parentHeight): void
+    private function paint(Cancellation $ctx, AbstractLayer $layer, int $originX, int $originY, int $parentWidth, int $parentHeight): void
     {
         [$anchor, $x, $y] = $layer->getPosition();
         [$anchorX, $anchorY] = PositionResolver::resolve(
@@ -78,51 +84,53 @@ abstract class AbstractRenderer implements RendererInterface
         $absY = $originY + $anchorY + $y;
 
         match (true) {
-            $layer instanceof TableLayer => $this->paintTable($layer, $absX, $absY),
-            $layer instanceof TableRowLayer => $this->paintRow($layer, $absX, $absY),
-            $layer instanceof TableCellLayer => $this->paintCell($layer, $absX, $absY),
-            $layer instanceof ImageLayer => $this->paintImage($layer, $absX, $absY),
-            $layer instanceof TextLayer => $this->paintText($layer, $absX, $absY),
-            $layer instanceof QrCodeLayer => $this->paintQrCode($layer, $absX, $absY),
+            $layer instanceof TableLayer => $this->paintTable($ctx, $layer, $absX, $absY),
+            $layer instanceof TableRowLayer => $this->paintRow($ctx, $layer, $absX, $absY),
+            $layer instanceof TableCellLayer => $this->paintCell($ctx, $layer, $absX, $absY),
+            $layer instanceof ImageLayer => $this->paintImage($ctx, $layer, $absX, $absY),
+            $layer instanceof TextLayer => $this->paintText($ctx, $layer, $absX, $absY),
+            $layer instanceof QrCodeLayer => $this->paintQrCode($ctx, $layer, $absX, $absY),
             default => throw new InvalidArgumentException('未知图层类型: ' . get_class($layer)),
         };
     }
 
-    private function paintTable(TableLayer $layer, int $x, int $y): void
+    private function paintTable(Cancellation $ctx, TableLayer $layer, int $x, int $y): void
     {
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
         $posy = $y;
         foreach ($layer->getRows() as $row) {
-            $this->paint($row, $x, $posy, $layer->getWidth(), $layer->getHeight());
+            // 行循环检查点：大表逐行轮询（真实长杆）
+            $ctx->throwIfRequested();
+            $this->paint($ctx, $row, $x, $posy, $layer->getWidth(), $layer->getHeight());
             $posy += $row->getHeight();
         }
     }
 
-    private function paintRow(TableRowLayer $layer, int $x, int $y): void
+    private function paintRow(Cancellation $ctx, TableRowLayer $layer, int $x, int $y): void
     {
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
         $posx = $x;
         foreach ($layer->getCells() as $cell) {
-            $this->paint($cell, $posx, $y, $layer->getWidth(), $layer->getHeight());
+            $this->paint($ctx, $cell, $posx, $y, $layer->getWidth(), $layer->getHeight());
             $posx += $cell->getWidth();
         }
     }
 
-    private function paintCell(TableCellLayer $layer, int $x, int $y): void
+    private function paintCell(Cancellation $ctx, TableCellLayer $layer, int $x, int $y): void
     {
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
         if ($layer->getContentLayer() !== null) {
-            $this->paint($layer->getContentLayer(), $x, $y, $layer->getWidth(), $layer->getHeight());
+            $this->paint($ctx, $layer->getContentLayer(), $x, $y, $layer->getWidth(), $layer->getHeight());
         }
     }
 
-    private function paintImage(ImageLayer $layer, int $x, int $y): void
+    private function paintImage(Cancellation $ctx, ImageLayer $layer, int $x, int $y): void
     {
         // 绘制分派前按需物化（spec §4.3）：失败即抛，渲染面丢弃
-        $this->resolver->resolveLayer($layer);
+        $this->resolver->resolveLayer($ctx, $layer);
 
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
@@ -133,9 +141,9 @@ abstract class AbstractRenderer implements RendererInterface
         }
     }
 
-    private function paintText(TextLayer $layer, int $x, int $y): void
+    private function paintText(Cancellation $ctx, TextLayer $layer, int $x, int $y): void
     {
-        $this->resolver->resolveLayer($layer);
+        $this->resolver->resolveLayer($ctx, $layer);
 
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
@@ -160,9 +168,9 @@ abstract class AbstractRenderer implements RendererInterface
         }
     }
 
-    private function paintQrCode(QrCodeLayer $layer, int $x, int $y): void
+    private function paintQrCode(Cancellation $ctx, QrCodeLayer $layer, int $x, int $y): void
     {
-        $this->resolver->resolveLayer($layer);
+        $this->resolver->resolveLayer($ctx, $layer);
 
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 

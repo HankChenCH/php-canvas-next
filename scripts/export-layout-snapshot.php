@@ -32,6 +32,7 @@ use HankChen\CanvasNext\Layer\TableRowTemplate;
 use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\Renderer\AbstractRenderer;
 use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
+use HankChen\CanvasNext\Runtime\NullCancellation;
 
 /**
  * 录制渲染器：把绘制原语调用录成数组，驱动真实渲染模板（物化→遍历→分派→容器下钻），
@@ -143,7 +144,7 @@ function exportCase(string $name, string $description, Canvas $canvas): array
     $canvas = Canvas::fromGraph($canvas->graph());
 
     $renderer = new RecordingRenderer();
-    $renderer->render($canvas);
+    $renderer->render(new NullCancellation(), $canvas);
     $records = $renderer->records;
 
     $textLayers = [];

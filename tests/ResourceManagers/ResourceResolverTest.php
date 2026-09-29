@@ -8,6 +8,7 @@ use HankChen\CanvasNext\Layer\QrCodeLayer;
 use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\Exception\MaterializeException;
 use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
+use HankChen\CanvasNext\Runtime\NullCancellation;
 use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
 use HankChen\CanvasNext\Tests\Support\FakeDownloader;
 
@@ -48,7 +49,7 @@ class ResourceResolverTest extends CanvasTestCase
             ImageLayer::make(10, 10)->setImage($url),
             ImageLayer::make(10, 10)->setImage($url)
         );
-        $resolver->resolve($canvas);
+        $resolver->resolve(new NullCancellation(), $canvas);
 
         $this->assertCount(1, $this->downloader->calls);
 
@@ -63,7 +64,7 @@ class ResourceResolverTest extends CanvasTestCase
         $resolver = $this->resolverWith('should-not-be-used');
 
         $layer = ImageLayer::make(10, 10)->setImage('/tmp/local.png');
-        $resolver->resolveLayer($layer);
+        $resolver->resolveLayer(new NullCancellation(), $layer);
 
         $this->assertCount(0, $this->downloader->calls);
         $this->assertSame('/tmp/local.png', $layer->getResolvedSrc());
@@ -74,7 +75,7 @@ class ResourceResolverTest extends CanvasTestCase
         $resolver = $this->resolverWith(false);
 
         try {
-            $resolver->resolveLayer(ImageLayer::make(10, 10)->setImage('https://cdn.example.com/missing.png'));
+            $resolver->resolveLayer(new NullCancellation(), ImageLayer::make(10, 10)->setImage('https://cdn.example.com/missing.png'));
             $this->fail('下载失败必须抛错');
         } catch (MaterializeException $e) {
             // 绘制期错误 code 化（spec §5.2）：code 稳定，消息保留原始上下文
@@ -89,7 +90,7 @@ class ResourceResolverTest extends CanvasTestCase
         $layer = TextLayer::make(100, 30)->setText('文本')
             ->setFont('https://cdn.example.com/fonts/msyh.ttf', 12, '#000');
 
-        $resolver->resolveLayer($layer);
+        $resolver->resolveLayer(new NullCancellation(), $layer);
 
         $expectedPath = $this->cacheDir('text_layers') . '/msyh.ttf';
         $this->assertFileExists($expectedPath);
@@ -101,7 +102,7 @@ class ResourceResolverTest extends CanvasTestCase
         $resolver = $this->resolverWith('should-not-be-used');
         $layer = QrCodeLayer::make(60, 60)->setText('https://example.com/中文');
 
-        $resolver->resolveLayer($layer);
+        $resolver->resolveLayer(new NullCancellation(), $layer);
 
         $src = $layer->getResolvedSrc();
         $this->assertNotNull($src);
@@ -115,9 +116,9 @@ class ResourceResolverTest extends CanvasTestCase
         $resolver = $this->resolverWith('should-not-be-used');
         $layer = QrCodeLayer::make(60, 60)->setText('https://example.com');
 
-        $resolver->resolveLayer($layer);
+        $resolver->resolveLayer(new NullCancellation(), $layer);
         $first = $layer->getResolvedSrc();
-        $resolver->resolveLayer($layer);
+        $resolver->resolveLayer(new NullCancellation(), $layer);
 
         $this->assertSame($first, $layer->getResolvedSrc());
         $this->assertFileExists($first);

@@ -18,6 +18,7 @@ use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableCellLayer;
 use HankChen\CanvasNext\Layer\TableRowLayer;
 use HankChen\CanvasNext\Layer\TextLayer;
+use HankChen\CanvasNext\Runtime\Cancellation;
 
 /**
  * 资源物化：绘制分派前按需物化（spec §4.3，渲染期角色重述）
@@ -39,48 +40,51 @@ class ResourceResolver
         $this->downloader = $downloader ?? new DefaultDownloader();
     }
 
-    public function resolveLayer(AbstractLayer $layer): void
+    public function resolveLayer(Cancellation $ctx, AbstractLayer $layer): void
     {
+        // 物化前检查点（四处之一，ADR 0008）：任何下载/生成 I/O 发生前轮询取消信号
+        $ctx->throwIfRequested();
+
         match (true) {
-            $layer instanceof TableLayer => $this->resolveTable($layer),
-            $layer instanceof TableRowLayer => $this->resolveRow($layer),
-            $layer instanceof TableCellLayer => $this->resolveCell($layer),
-            $layer instanceof ImageLayer => $this->materializeImage($layer),
-            $layer instanceof TextLayer => $this->materializeFont($layer),
+            $layer instanceof TableLayer => $this->resolveTable($ctx, $layer),
+            $layer instanceof TableRowLayer => $this->resolveRow($ctx, $layer),
+            $layer instanceof TableCellLayer => $this->resolveCell($ctx, $layer),
+            $layer instanceof ImageLayer => $this->materializeImage($ctx, $layer),
+            $layer instanceof TextLayer => $this->materializeFont($ctx, $layer),
             $layer instanceof QrCodeLayer => $this->materializeQrCode($layer),
             default => null,
         };
     }
 
-    public function resolve(Canvas $canvas): void
+    public function resolve(Cancellation $ctx, Canvas $canvas): void
     {
         foreach ($canvas->getLayers() as $layer) {
-            $this->resolveLayer($layer);
+            $this->resolveLayer($ctx, $layer);
         }
     }
 
-    private function resolveTable(TableLayer $table): void
+    private function resolveTable(Cancellation $ctx, TableLayer $table): void
     {
         foreach ($table->getRows() as $row) {
-            $this->resolveLayer($row);
+            $this->resolveLayer($ctx, $row);
         }
     }
 
-    private function resolveRow(TableRowLayer $row): void
+    private function resolveRow(Cancellation $ctx, TableRowLayer $row): void
     {
         foreach ($row->getCells() as $cell) {
-            $this->resolveLayer($cell);
+            $this->resolveLayer($ctx, $cell);
         }
     }
 
-    private function resolveCell(TableCellLayer $cell): void
+    private function resolveCell(Cancellation $ctx, TableCellLayer $cell): void
     {
         if ($cell->getContentLayer() !== null) {
-            $this->resolveLayer($cell->getContentLayer());
+            $this->resolveLayer($ctx, $cell->getContentLayer());
         }
     }
 
-    private function materializeImage(ImageLayer $layer): void
+    private function materializeImage(Cancellation $ctx, ImageLayer $layer): void
     {
         $src = $layer->getImage();
         if ($src === null) {
@@ -93,7 +97,7 @@ class ResourceResolver
 
         $path = $this->cachePath('img_layers', $src);
         if (!is_file($path)) {
-            $content = $this->downloader->download($src);
+            $content = $this->downloader->download($ctx, $src);
             if (!$content) {
                 throw new MaterializeException('resource_download_failed', "resource_download_failed: could not get remote file({$src})");
             }
@@ -106,7 +110,7 @@ class ResourceResolver
         $layer->setResolvedSrc($path);
     }
 
-    private function materializeFont(TextLayer $layer): void
+    private function materializeFont(Cancellation $ctx, TextLayer $layer): void
     {
         $font = $layer->getFont();
         // 空串/纯数字表示渲染端内置默认字体
@@ -116,7 +120,7 @@ class ResourceResolver
 
         $path = $this->cachePath('text_layers', $font);
         if (!is_file($path)) {
-            $content = $this->downloader->download($font);
+            $content = $this->downloader->download($ctx, $font);
             if (!$content) {
                 throw new MaterializeException('resource_download_failed', "resource_download_failed: could not get remote file({$font})");
             }
@@ -129,6 +133,10 @@ class ResourceResolver
         $layer->setResolvedFont($path);
     }
 
+    /**
+     * 二维码物化不持 ctx：纯 CPU 生成 + 落盘，无阻塞 I/O；
+     * 取消语义已由 resolveLayer 入口检查点覆盖
+     */
     private function materializeQrCode(QrCodeLayer $layer): void
     {
         if ($layer->getText() === '' || $layer->getResolvedSrc() !== null) {

@@ -17,6 +17,7 @@ PHP library `hankchen/php-canvas-next`（`hankchen/php-canvas` 的下一代）�
 - `src/Exception/` — 错误分类面（四阶段模型，spec §5.2）：`DecodeException`（解码期）/`HydrateException`（填充期）/`PaginateException`（分页期：`content_overflow`/`paginate_target_invalid`/`page_geometry_invalid`）/`MaterializeException`（绘制期），统一承载稳定 code（`getErrorCode()`），消息 = code 前缀 + 上下文。
 - `src/Renderer/AbstractRenderer.php` — 渲染模板：begin → 遍历图层 instanceof 分派 → 容器递归（坐标偏移栈，全部直画同一渲染面）→ end；后端只实现 `begin/end/drawRect/drawImage/drawText` 五个原语。**渲染器无预遍历**：Image/Text/QrCode 分支开头按需 `resolveLayer` 惰性物化（ADR 0005），失败即抛、渲染面丢弃。**本包不含任何具体后端**。
 - `src/Renderer/PositionResolver.php` — 锚点串 → 父盒内偏移（纯函数，不做钳位，负值即溢出）。
+- `src/Runtime/` — 渲染期控制面值对象族（ADR 0008，render-cancellation 工票 02）：`Cancellation` 信号接口（advisory only，`isRequested`/`throwIfRequested`/`deadline`）+ `NullCancellation` 零值 + `CancellationSource` 取消源（cancel 幂等 first-wins 一次性，信号端只可观察）+ `TimeoutCancellation`（构造即换算 deadline，pull-based 零 loop）+ `CompositeCancellation`（任一源触发即触发，空 = NullCancellation 语义）。检查点抛 `MaterializeException`，code `render_cancelled`/`render_deadline_exceeded`；deadline 余量换算 socket 超时在 `DefaultDownloader`。
 - `src/ResourceManagers/ResourceResolver.php` — 资源物化：远程图片/字体下载（失败抛 code `resource_download_failed`）、QR 经 endroid 生成 PNG，回写图层 `setResolvedSrc/setResolvedFont`。由渲染器绘制分支按需调用（角色=绘制时物化，非渲染前预遍历）。是核心包的一部分（任何后端都需要它）。
 - `src/Text/` — `Uax14LineBreaker`（图素簇/词边界/禁则，默认断行器）、`HeuristicMeasurer`（半角 0.55 字宽启发式，默认度量器）、`Graphemes`（图素切分助手）。
 - 伴随包 `../php-canvas-image-renderer`：`Renderer\Image\ImageRenderer` + `Renderer\Image\ImageManagerFactory` + 像素测试与目验脚本；命名空间根 `HankChen\CanvasNext\Renderer\Image\`。
@@ -35,7 +36,7 @@ php -l src/...         # 改动文件语法检查
 ## Rules and gotchas
 
 - **依赖方向单向**：Renderer → Canvas → Layer；结构侧（Canvas/Layer）不得 import 渲染侧与图像库，**核心包 composer require 保持 `php + endroid/qr-code`**——把 intervention 等渲染依赖引回核心是回归。图层 setter 禁止 I/O，物化只发生在 `ResourceResolver`。
-- **标准管线**：`$renderer->render((new CanvasHydrator())->hydrate($canvas, $dataset))`——hydrate（数据填充，数据维度，渲染前纯结构）与物化（资源维度，绘制时惰性）两维分离；未绑数据集（null）或无绑定画布，两步均恒等直通。编译入口走 `DefaultCanvasCompiler::compile()`（工票 01 骨架，hydrate → paginate 钉序）。
+- **标准管线**：`$renderer->render(new NullCancellation(), (new CanvasHydrator())->hydrate($canvas, $dataset))`——渲染期控制面以 `Cancellation $ctx` 显式首参穿线（ADR 0008，严格非空，不受控即传零值 `NullCancellation`）；hydrate（数据填充，数据维度，渲染前纯结构）与物化（资源维度，绘制时惰性）两维分离；未绑数据集（null）或无绑定画布，两步均恒等直通。编译入口走 `DefaultCanvasCompiler::compile()`（工票 01 骨架，hydrate → paginate 钉序）。
 - **graph 条件写键（V2 新增面）**：模板态 TableLayer 写 `data`/`template`、不写 `rows`；V1 态恒写 `rows`、不写 `template`/`data`（template ⊕ rows XOR，双键同现 `fromGraph` 抛 `template_rows_conflict`）。表达式标记：TextLayer 恒写三键 data（现状形态），Image/Qr 仅标记态写 `expression` 键（保 Go↔PHP 字节 parity）；`data.value` 恒镜像表达式原文，求值结果永不落 graph。
 - **错误 code 是三端契约**：新增错误必须归入三阶段之一并挂稳定 code（见 `.scratch/table-layer-v2/spec.md` §5.2），消息可改、code 不可改；求值器内部错误（语法等）code 归求值器 spec。
 - **priority 语义**：越大越先渲染（越垫底），与旧库一致。
