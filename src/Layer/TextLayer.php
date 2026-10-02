@@ -64,6 +64,30 @@ class TextLayer extends AbstractLayer
         return $this;
     }
 
+    /**
+     * 宽自适应 = 未断行自然宽（ADR 0014）：按显式换行拆段取最大度量宽（ceil）+
+     * 横向 padding（trunc 求和，镜像 autoHeight 纵向 padding）；空文本 = 0 + padding
+     * （空串拆段得 ['']，度量宽 0 自然落到该分支）。求值忽略 autowrap——内容盒宽即
+     * 自然宽，断行不再切分（除显式换行），组合退化为不折行，autowrap 标志留在结构
+     * 不动；拆段只按 \n 硬拆、不经 LineBreaker 缝（断行策略属 autowrap 渲染路径）。
+     * 度量经层内度量缝（缺省启发式，可注入增强），字体用原始引用（布局不依赖物化）
+     */
+    public function getWidth(): int
+    {
+        if (!$this->autoWidth) {
+            return $this->width;
+        }
+
+        $measurer = $this->measurerFactory->create($this->font, $this->fontSize);
+
+        $natural = 0.0;
+        foreach (explode("\n", $this->text) as $segment) {
+            $natural = max($natural, $measurer->measure($segment));
+        }
+
+        return intval(ceil($natural)) + intval($this->padding['left'] + $this->padding['right']);
+    }
+
     public function getHeight(): int
     {
         if (!$this->autoHeight) {

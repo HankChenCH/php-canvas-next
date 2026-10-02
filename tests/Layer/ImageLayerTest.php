@@ -32,6 +32,15 @@ class ImageLayerTest extends CanvasTestCase
         $this->assertSame('/tmp/local-a.png', $layer->getResolvedSrc());
     }
 
+    public function testAutoWidthStaysNoop(): void
+    {
+        // autoWidth 仅 TextLayer 有义：Image 自然尺寸需物化资源才可知（ADR 0005
+        // 物化红线，物化不前移到布局期），宽度求值不覆盖，flag 维持无义
+        $layer = ImageLayer::make('auto', 40)->setImage('https://example.com/a.png');
+
+        $this->assertSame(0, $layer->getWidth());
+    }
+
     public function testGraphKeepsRawValue(): void
     {
         $graph = ImageLayer::make(10, 10)->setImage('https://example.com/a.png')->graph();

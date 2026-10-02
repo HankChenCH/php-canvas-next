@@ -21,6 +21,17 @@ class QrCodeLayerTest extends CanvasTestCase
         $this->assertSame(60, $layer->getHeight());
     }
 
+    public function testAutoWidthStaysNoop(): void
+    {
+        // autoWidth 仅 TextLayer 有义：QrCode 无自然宽概念（任意尺寸合法），
+        // 宽度求值不覆盖、按宽兜底正方形取的仍是声明宽，flag 维持无义
+        $layer = QrCodeLayer::make('auto', 'auto')->setText('https://example.com');
+
+        $this->assertSame(0, $layer->getWidth());
+        $this->assertSame(0, $layer->getHeight());
+        $this->assertTrue($layer->graph()['spec']['shape']['autoWidth']);
+    }
+
     public function testGraphAlwaysCarriesValue(): void
     {
         // 无损：value 与是否已物化无关
