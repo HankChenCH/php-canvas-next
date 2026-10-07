@@ -1,9 +1,10 @@
 {
     "name": "hankchen/php-canvas-next",
-    "version": "1.0.0",
     "description": "next generation of php-canvas: layer tree (pure structure) + pluggable renderers (image now, pdf later)",
     "type": "library",
     "license": "MIT",
+    "keywords": ["canvas", "layer", "qr-code", "rendering", "layout"],
+    "homepage": "https://github.com/HankChenCH/php-canvas-next",
     "autoload": {
         "psr-4": {
             "HankChen\\CanvasNext\\": "src/"
@@ -34,7 +35,5 @@
     },
     "require-dev": {
         "phpunit/phpunit": "^9.6"
-    },
-    "repositories": {
     }
 }
