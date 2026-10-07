@@ -80,6 +80,42 @@ class QrCodeLayer extends AbstractLayer
         return $this->getWidth();
     }
 
+    /**
+     * 二维码内容边长 = min(内容区宽, 内容区高)：内切于内容盒的正方形
+     * （quiet zone 语义——padding 留白即码外静区），≤0 时绘制端只画盒
+     */
+    public function getContentSide(): int
+    {
+        return min($this->getContentWidth(), $this->getContentHeight());
+    }
+
+    /**
+     * 内容盒内二维码的绘制起点（对齐 + padding，镜像 ImageLayer::getImageOrigin：
+     * 内容尺寸换成内切边长），纯布局计算
+     *
+     * @return array{0: int, 1: int} [x, y]
+     */
+    public function getQrOrigin(): array
+    {
+        $side = $this->getContentSide();
+
+        $posx = match ($this->horizontalAlign) {
+            'left' => $this->padding['left'],
+            'center' => ($this->getWidth() - $side) / 2,
+            'right' => $this->getWidth() - $side,
+            default => 0,
+        };
+
+        $posy = match ($this->verticalAlign) {
+            'top' => $this->padding['top'],
+            'center' => ($this->getHeight() - $side) / 2,
+            'bottom' => $this->getHeight() - $side,
+            default => 0,
+        };
+
+        return [intval($posx), intval($posy)];
+    }
+
     public function graph(): array
     {
         $graph = parent::graph();

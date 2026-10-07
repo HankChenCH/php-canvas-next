@@ -176,8 +176,12 @@ abstract class AbstractRenderer implements RendererInterface
 
         $src = $layer->getResolvedSrc();
         if ($src !== null) {
-            // 二维码按宽度正方形铺放（与旧库 QrCodeLayer 行为一致）
-            $this->drawImage($src, $x, $y, $layer->getWidth(), $layer->getWidth());
+            // 二维码内切于内容盒：边长 = min(内容区宽高)（quiet zone 语义——padding 留白
+            // 即码外静区，露图层盒背景），对齐 + padding 定位（镜像 paintImage 语义）；
+            // 边长 ≤0 由 drawImage 防护只画盒
+            [$originX, $originY] = $layer->getQrOrigin();
+            $side = $layer->getContentSide();
+            $this->drawImage($src, $x + $originX, $y + $originY, $side, $side);
         }
     }
 
