@@ -30,6 +30,7 @@ use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\Renderer\Image\ImageRenderer; // 来自 php-canvas-image-renderer 包
+use HankChen\CanvasNext\Runtime\NullCancellation;
 
 $canvas = Canvas::make(400, 300,
     // priority 越大越先渲染（越垫底），与 php-canvas 一致
@@ -41,11 +42,12 @@ $canvas = Canvas::make(400, 300,
         ->setPriority(1)
 );
 
-$image = (new ImageRenderer())->render($canvas); // intervention/image v4 ImageInterface
+// 第一个参数是渲染取消上下文；无取消需求传 NullCancellation
+$image = (new ImageRenderer())->render(new NullCancellation(), $canvas); // intervention/image v4 ImageInterface
 $image->save('/tmp/out.png');
 ```
 
-单图层渲染：`(new ImageRenderer())->renderLayer($layer)`。
+单图层渲染：`(new ImageRenderer())->renderLayer(new NullCancellation(), $layer)`。
 
 ## 核心概念
 
