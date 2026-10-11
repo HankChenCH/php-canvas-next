@@ -2,6 +2,14 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 1.1.0 - 2026-10-11
+
+- 表达式内建函数求值器（v1 方法面，ADR 0018）：mustache 插值内函数调用形态 `{{date(row.d, 'YYYY年MM月DD日')}}`，签名 `date(path[, format])` / `number(path[, n])` / `fixed(path[, n])` / `percent(path[, n])`
+- `DateFormat` 日期 token 语言：moment 风格 14 token（含周几中文输出），方括号转义，严格 ISO 解析（3 种无时区形态、wall clock 语义、零时区依赖），token 表为三端契约权威源
+- `NumberFormat` 数字族：十进制字符串语义（最短往返归一、half-up 朝 +∞、2.675→2.68 不走二进制原生 round），千分位/定点补零/百分比乘 100
+- 错误分轴：缺字段=空串、不可解析/数值=原文直通（值面宽松）；未知函数/参数个数/文法错 fail-fast 并入 `expression_syntax_error`，零新错误码
+- 共享 fixture contract v2：104 用例（value/date/number 三组）+ dateTokens 14 行转译表，由 `scripts/export-hydrate-fixtures.php` 导出
+
 ## 1.0.0 - 2026-10-07
 
 首个稳定版。
