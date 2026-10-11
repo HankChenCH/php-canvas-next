@@ -6,8 +6,11 @@ declare(strict_types=1);
  * TableLayer V2 三端共享 fixture 导出（spec §7 / go-canvas 工票 12）。
  * 两个一致性面各一份 JSON，Go 侧 hydrate 包测试为 runner，canvas-web 适配后可复用：
  *
- * - expression-eval.json（contract: expression-eval v1）
- *   默认求值器（受限插值）语义用例：{name, description, template, context, expect}
+ * - expression-eval.json（contract: expression-eval v2）
+ *   默认求值器（受限插值）语义用例：{name, description, group, template, context, expect}
+ *   group = value|date|number（v2 增量：内建函数 v1 = date/number/fixed/percent）；
+ *   顶层 dateTokens = 日期 token 转译表（v2 增量：{sample, rows:[{token, semantics, expect}]}，
+ *   PHP 内置表权威导出，Go 端同构表断言锁漂移）；
  *   expect = 求值结果串 | {errorCode}（spec §5.2 稳定 code，三端一致性抓手）
  *
  * - expand-semantics.json（contract: expand-semantics v1）
@@ -28,6 +31,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Exception\CanvasNextExceptionInterface;
+use HankChen\CanvasNext\Expression\DateFormat;
 use HankChen\CanvasNext\Hydrate\CanvasHydrator;
 use HankChen\CanvasNext\Expression\InterpolationEvaluator;
 use HankChen\CanvasNext\Layer\ImageLayer;
@@ -39,7 +43,7 @@ use HankChen\CanvasNext\Layer\TableRowTemplate;
 use HankChen\CanvasNext\Layer\TextLayer;
 
 // ---------------------------------------------------------------------------
-// expression-eval v1
+// expression-eval v2
 // ---------------------------------------------------------------------------
 
 /** 行上下文：行命名空间 + 全局根键混合（语义源 InterpolationEvaluatorTest::rowContext） */
@@ -58,65 +62,333 @@ function fixtureRootContext(): array
     return ['orderNo' => 'A2026-001', 'nested' => ['k' => 'v']];
 }
 
+/** 日期组上下文：3 种可解析形态 + 不可解析/数值/bool/容器/空串各一（语义源 ::dateContext） */
+function fixtureDateContext(): array
+{
+    return [
+        'row' => [
+            'd' => '2026-10-11 14:30:05',
+            'day' => '2026-10-11',
+            'isoT' => '2026-10-11T14:30:05',
+            'oob' => '2026-02-30',
+            'h24' => '2026-10-11 24:00:00',
+            'bad' => '2026/10/11',
+            'num' => 20261011,
+            'empty' => '',
+            'flag' => true,
+            'tags' => ['a'],
+        ],
+        '$index' => 3,
+        'orderNo' => 'A2026-001',
+    ];
+}
+
+/** 数字组上下文：常规区间数值 + 严格十进制串 + 不可解析/bool/容器/空串各一（语义源 ::numberContext） */
+function fixtureNumberContext(): array
+{
+    return [
+        'row' => [
+            'v' => 1234.5,
+            'i' => 1234567,
+            'z' => 0,
+            'n' => -1234.5,
+            'f' => 8.9,
+            'f2' => 9.9999,
+            'p' => 0.826,
+            'pn' => -0.826,
+            'nz' => -0.4,
+            'nt' => -2.5,
+            'nf' => -0.85,
+            'r' => 2.675,
+            'rb' => 2.675000000001,
+            'q' => 0.125,
+            'w' => 0.123456789,
+            's' => '1234.5',
+            's007' => '007',
+            'sf' => '8.9',
+            'bad' => '1e3',
+            'empty' => '',
+            'flag' => true,
+            'tags' => ['a'],
+            'day' => '2026-10-11',
+        ],
+        '$index' => 3,
+        'orderNo' => 'A2026-001',
+    ];
+}
+
 /**
- * 表达式求值用例集。[name, description, template, context, expect]
- * expect 为串 = 求值成功预期；为 ['errorCode' => ...] = 预期报错
+ * 表达式求值用例集。[name, description, group, template, context, expect]
+ * group = value|date|number（spec §6）；expect 为串 = 求值成功预期；为 ['errorCode' => ...] = 预期报错
  */
 function expressionCases(): array
 {
     $row = fixtureRowContext();
     $root = fixtureRootContext();
+    $date = fixtureDateContext();
+    $num = fixtureNumberContext();
+    $rootWithDateKey = ['date' => 'x'];
 
     return [
+        // ---- value 组：既有取值用例（21 条，语义源 InterpolationEvaluatorTest 路径面） ----
         ['row-field-and-literal-mix', '行字段与字面混排 + $index 插值',
-            '姓名：{{row.name}}（{{$index}}）', $row, '姓名：张三（3）'],
+            'value', '姓名：{{row.name}}（{{$index}}）', $row, '姓名：张三（3）'],
         ['multiple-fragments-concatenate', '多片段拼接（根键 + 行字段）',
-            '{{orderNo}}-{{row.name}}', $row, 'A2026-001-张三'],
+            'value', '{{orderNo}}-{{row.name}}', $row, 'A2026-001-张三'],
         ['bare-name-reads-root-key', '裸名只读全局根键（命名空间分离，无遮蔽）',
-            '{{orderNo}}', $row, 'A2026-001'],
+            'value', '{{orderNo}}', $row, 'A2026-001'],
         ['nested-dot-path-row', '行字段嵌套点路径下钻',
-            '{{row.user.city}}', $row, '杭州'],
+            'value', '{{row.user.city}}', $row, '杭州'],
         ['nested-dot-path-root', '根键嵌套点路径下钻',
-            '{{nested.k}}', $root, 'v'],
+            'value', '{{nested.k}}', $root, 'v'],
         ['root-escape-equals-bare-name', '$root 显式取根与裸名等价',
-            '{{$root.orderNo}}', $row, 'A2026-001'],
+            'value', '{{$root.orderNo}}', $row, 'A2026-001'],
         ['whitespace-inside-braces-tolerated', '花括号内空白容忍',
-            '{{ row.name }}', $row, '张三'],
+            'value', '{{ row.name }}', $row, '张三'],
         ['numeric-float-stringified', '浮点字符串化（常规区间）',
-            '{{row.score}}', $row, '98.5'],
+            'value', '{{row.score}}', $row, '98.5'],
         ['index-stringified', '$index 整数字符串化',
-            '{{$index}}', $row, '3'],
+            'value', '{{$index}}', $row, '3'],
         ['fragmentless-marked-string-literal', '不含 {{ 的标记串 = 整串字面（合法无意义）',
-            '纯文本', $row, '纯文本'],
+            'value', '纯文本', $row, '纯文本'],
         ['unclosed-brace-stays-literal', '未闭合 {{ 剩余全字面（含空白片段起点）',
-            '价格 {{ 未知', $row, '价格 {{ 未知'],
+            'value', '价格 {{ 未知', $row, '价格 {{ 未知'],
         ['unclosed-brace-no-close-stays-literal', '未闭合 {{ 只有开标记时全字面',
-            '价格 {{row.name', $row, '价格 {{row.name'],
+            'value', '价格 {{row.name', $row, '价格 {{row.name'],
         ['missing-row-field-empty-signal', '行缺字段 = 空串信号（字段类策略由展开器施加）',
-            '姓名：{{row.nickname}}', $row, '姓名：'],
+            'value', '姓名：{{row.nickname}}', $row, '姓名：'],
         ['missing-root-field-empty-signal', '根缺字段 = 空串信号',
-            '{{nickname}}', ['other' => 'x'], ''],
+            'value', '{{nickname}}', ['other' => 'x'], ''],
         ['null-mid-path-empty-signal', '中途 null = 空串信号',
-            '{{row.a}}', ['row' => ['a' => null, 'b' => ['c' => null]], 'orderNo' => 'x'], ''],
+            'value', '{{row.a}}', ['row' => ['a' => null, 'b' => ['c' => null]], 'orderNo' => 'x'], ''],
         ['null-terminal-empty-signal', '末端 null = 空串信号',
-            '{{row.b.c}}', ['row' => ['a' => null, 'b' => ['c' => null]], 'orderNo' => 'x'], ''],
+            'value', '{{row.b.c}}', ['row' => ['a' => null, 'b' => ['c' => null]], 'orderNo' => 'x'], ''],
         ['type-mismatch-array-at-scalar', '数组落到标量位 = 报错',
-            '{{row.user}}', $row, ['errorCode' => 'expression_type_mismatch']],
+            'value', '{{row.user}}', $row, ['errorCode' => 'expression_type_mismatch']],
         ['type-mismatch-scalar-drill', '标量中途下钻 = 报错',
-            '{{row.name.x}}', $row, ['errorCode' => 'expression_type_mismatch']],
+            'value', '{{row.name.x}}', $row, ['errorCode' => 'expression_type_mismatch']],
         ['row-prefix-outside-row-context', 'row. 前缀出现在非行上下文 = 报错（模板复制到表外）',
-            '{{row.name}}', $root, ['errorCode' => 'expression_row_outside_loop']],
+            'value', '{{row.name}}', $root, ['errorCode' => 'expression_row_outside_loop']],
         ['empty-fragment-syntax-error', '空表达式片段 = 语法错误',
-            '名：{{}}', $row, ['errorCode' => 'expression_syntax_error']],
+            'value', '名：{{}}', $row, ['errorCode' => 'expression_syntax_error']],
         ['malformed-path-syntax-error', '路径含空段 = 语法错误',
-            '{{row..name}}', $row, ['errorCode' => 'expression_syntax_error']],
+            'value', '{{row..name}}', $row, ['errorCode' => 'expression_syntax_error']],
+
+        // ---- value 组：片段分类与调用文法（与族无关的通用文法面，语义源 05 钉稿） ----
+        ['unknown-function-fails-fast', '未知函数 fail-fast（不在白名单）',
+            'value', '{{foo(row.x)}}', $row, ['errorCode' => 'expression_syntax_error']],
+        ['unknown-function-case-sensitive', '函数名大小写敏感：DATE 是未知函数',
+            'value', '{{DATE(row.d)}}', $date, ['errorCode' => 'expression_syntax_error']],
+        ['unknown-function-non-ascii', '非 ASCII 名按调用分类 → 未知函数',
+            'value', '{{日期(row.d)}}', $date, ['errorCode' => 'expression_syntax_error']],
+        ['call-classified-with-space', 'token 后可选空白即调用位：foo (bar) 按调用分类',
+            'value', '{{foo (row.x)}}', $row, ['errorCode' => 'expression_syntax_error']],
+        ['path-with-paren-stays-path', '首 token 后无左括号仍按路径（含 ( 键名，字节兼容）',
+            'value', '{{row.a(b}}', $row, ''],
+        ['bare-name-date-key-is-path', '无 ( 恒为路径：数据集根键叫 date 合法',
+            'value', '{{date}}', $rootWithDateKey, 'x'],
+        ['call-structure-arg-garbage', '实参后期望 , 或 )：字符串实参后跟另一实参 = 语法错',
+            'value', "{{date(row.d, 'a' 'b')}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['call-structure-unterminated-string', '字符串实参未闭合 = 语法错',
+            'value', "{{date(row.d, 'a)}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['call-structure-trailing-content', '调用收口后有多余内容 = 语法错',
+            'value', "{{date(row.d, 'a')x}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['close-braces-in-string-truncates', '片段内禁 }} 字面：首个 }} 收口截断 → 字符串未闭合',
+            'value', "{{date(row.d, 'a}}b')}}", $date, ['errorCode' => 'expression_syntax_error']],
+
+        // ---- date 组：token 渲染 / 转义 / 预设 / 输入矩阵（语义源 06 钉稿 + spec §3） ----
+        ['date-default-format', '单参缺省格式 = YYYY-MM-DD（等价预设 date）',
+            'date', '{{date(row.day)}}', $date, '2026-10-11'],
+        ['date-datetime-sample-default', '含时间输入单参调用 → 缺省格式取日期部分',
+            'date', '{{date(row.d)}}', $date, '2026-10-11'],
+        ['date-preset-date', '预设 date 展开与缺省等价',
+            'date', "{{date(row.d, 'date')}}", $date, '2026-10-11'],
+        ['date-preset-datetime', '预设 datetime → YYYY-MM-DD HH:mm:ss',
+            'date', "{{date(row.d, 'datetime')}}", $date, '2026-10-11 14:30:05'],
+        ['date-input-iso-t-form', 'ISO T 形态可解析（仅大写 T）',
+            'date', "{{date(row.isoT, 'datetime')}}", $date, '2026-10-11 14:30:05'],
+        ['date-preset-whole-match', '预设整体等值才命中：datetime X 按 token 串解析 → X 白名单外报错',
+            'date', "{{date(row.d, 'datetime X')}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['date-escape-preset-name', '要输出字面 date 用转义段 [date]',
+            'date', "{{date(row.d, '[date]')}}", $date, 'date'],
+        ['date-chinese-literal-mix', '非 ASCII 字母字面直通：中文格式写即所得',
+            'date', "{{date(row.d, 'YYYY年MM月DD日')}}", $date, '2026年10月11日'],
+        ['date-weekday-tokens', '周几中文输出（dddd 全称 / ddd 简称）',
+            'date', "{{date(row.d, 'dddd ddd')}}", $date, '星期日 周日'],
+        ['date-full-combo', '全 token 组合 + 中文字面混排',
+            'date', "{{date(row.d, 'YYYY-MM-DD HH:mm:ss dddd')}}", $date, '2026-10-11 14:30:05 星期日'],
+        ['date-token-case-sensitive', 'token 大小写敏感：MM 月 ≠ mm 分',
+            'date', "{{date(row.d, 'MM月mm分')}}", $date, '10月30分'],
+        ['date-escape-literal-segments', '方括号转义段内容字面直通（token 不渲染）',
+            'date', "{{date(row.d, '[YYYY]年[MM]月')}}", $date, 'YYYY年MM月'],
+        ['date-escape-two-layer-orthogonal', '单引号翻倍转义与方括号转义两层正交',
+            'date', "{{date(row.d, '[it''s]')}}", $date, "it's"],
+        ['date-escape-unclosed-bracket', '未配对 [ 按普通字符字面输出（含 [ 自身）',
+            'date', "{{date(row.d, '第[')}}", $date, '第['],
+        ['date-escape-orphan-bracket', '孤立 ] 字面输出',
+            'date', "{{date(row.d, ']]')}}", $date, ']]'],
+        ['date-escape-nested-bracket', '转义段至首个 ] 止，段内无嵌套无再次转义',
+            'date', "{{date(row.d, '[a[b]')}}", $date, 'a[b'],
+        ['date-escape-then-whitelist', '未配对 [ 之后字符仍走 token 白名单 → fail-fast',
+            'date', "{{date(row.d, '[today')}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['date-empty-format', '空格式串 = 零 token 零输出',
+            'date', "{{date(row.d, '')}}", $date, ''],
+        ['date-unknown-token', '白名单外 ASCII 字母 fail-fast（数据无关的确定性错误）',
+            'date', "{{date(row.d, 'YYYYQ')}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['date-lowercase-token', 'token 大小写敏感：小写 yyyy 无对应 token',
+            'date', "{{date(row.d, 'yyyy')}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['date-unparseable-passthrough', '非空字符串不可解析（斜杠格式）= 原文直通',
+            'date', '{{date(row.bad)}}', $date, '2026/10/11'],
+        ['date-numeric-passthrough', '数值输入 = 字符串化后原文直通（时间戳不收）',
+            'date', '{{date(row.num)}}', $date, '20261011'],
+        ['date-overflow-day-passthrough', '越界日期 2026-02-30 不可解析 = 原文直通',
+            'date', '{{date(row.oob)}}', $date, '2026-02-30'],
+        ['date-overflow-hour-passthrough', '24:00:00 不收（严格解析）= 原文直通',
+            'date', '{{date(row.h24)}}', $date, '2026-10-11 24:00:00'],
+        ['date-empty-value-empty-output', '空串输入 = 空串信号',
+            'date', 'x{{date(row.empty)}}', $date, 'x'],
+        ['date-missing-field-empty-output', '字段缺失 = 空串信号',
+            'date', '{{date(row.nope)}}', $date, ''],
+        ['date-bool-type-mismatch', 'bool 落参数位 = 报错（字符串化双端不一致）',
+            'date', '{{date(row.flag)}}', $date, ['errorCode' => 'expression_type_mismatch']],
+        ['date-container-type-mismatch', '数组落参数位 = 报错',
+            'date', '{{date(row.tags)}}', $date, ['errorCode' => 'expression_type_mismatch']],
+        ['date-zero-args-syntax-error', '零参调用文法合法但签名层拒 = 参数个数不符',
+            'date', '{{date()}}', $date, ['errorCode' => 'expression_syntax_error']],
+        ['date-three-args-syntax-error', '≥3 参 = 参数个数不符',
+            'date', "{{date(row.d, 'YYYY', 2)}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['date-second-arg-number-syntax-error', 'date 第二参须为字符串字面量',
+            'date', '{{date(row.d, 5)}}', $date, ['errorCode' => 'expression_syntax_error']],
+        ['date-first-arg-string-syntax-error', '首参文法层钉死为路径：字符串实参 = 语法错',
+            'date', "{{date('2026-10-11')}}", $date, ['errorCode' => 'expression_syntax_error']],
+        ['date-whitespace-tolerated', '调用内空白容忍：实参间 WS* 合法',
+            'date', "{{ date( row.d , 'YYYY-MM-DD' ) }}", $date, '2026-10-11'],
+        ['date-row-outside-loop', '调用首参 row. 前缀在非行上下文 = 报错（同门声明）',
+            'date', '{{date(row.d)}}', $root, ['errorCode' => 'expression_row_outside_loop']],
+
+        // ---- number 组：三函数语义 / 舍入边界 / 输入矩阵（语义源 07 钉稿 + spec §4） ----
+        ['number-thousands-default', 'number 缺省不定点：小数原样直出，仅整数部分分组',
+            'number', '{{number(row.v)}}', $num, '1,234.5'],
+        ['number-integer-grouping', '纯整数只分组',
+            'number', '{{number(row.i)}}', $num, '1,234,567'],
+        ['number-zero', '零 → 0（无符号无小数）',
+            'number', '{{number(row.z)}}', $num, '0'],
+        ['number-negative-outside-group', '负号在分组符之外',
+            'number', '{{number(row.n)}}', $num, '-1,234.5'],
+        ['number-with-n-rounds-then-groups', 'number 带 n：先定点 n 位补零再分组',
+            'number', '{{number(row.f, 2)}}', $num, '8.90'],
+        ['number-money-form', '千分位+定点组合 → 「-1,234.50」金额形态（05 禁组合下唯一可达路径）',
+            'number', '{{number(row.n, 2)}}', $num, '-1,234.50'],
+        ['number-with-n-pads-zero', 'number 带 n 整数补零',
+            'number', '{{number(row.z, 2)}}', $num, '0.00'],
+        ['fixed-default-n2', 'fixed 缺省 n=2（amis round 无参默认两位先例）',
+            'number', '{{fixed(row.f)}}', $num, '8.90'],
+        ['fixed-n3-pads', 'fixed 定点补零不分组',
+            'number', '{{fixed(row.f, 3)}}', $num, '8.900'],
+        ['fixed-n0-no-decimal-point', 'fixed n=0 无小数点',
+            'number', '{{fixed(row.f, 0)}}', $num, '9'],
+        ['fixed-integer-carry', '整数进位：9.9999 n3 → 10.000',
+            'number', '{{fixed(row.f2, 3)}}', $num, '10.000'],
+        ['fixed-decimal-rounding', '十进制字符串舍入：2.675 → 2.68（不走二进制原生 round）',
+            'number', '{{fixed(row.r, 2)}}', $num, '2.68'],
+        ['fixed-near-boundary', '近界 2.675000000001 → 2.68',
+            'number', '{{fixed(row.rb, 2)}}', $num, '2.68'],
+        ['fixed-tie-up', '精确 tie 正数进位：0.125 n2 → 0.13',
+            'number', '{{fixed(row.q, 2)}}', $num, '0.13'],
+        ['fixed-negative-tie-toward-zero', 'tie 时负数朝零：-2.5 n0 → -2（half-up 朝 +∞）',
+            'number', '{{fixed(row.nt, 0)}}', $num, '-2'],
+        ['fixed-negative-tie-fraction', 'tie 时负数朝零：-0.85 n1 → -0.8',
+            'number', '{{fixed(row.nf, 1)}}', $num, '-0.8'],
+        ['fixed-no-negative-zero', '定点结果为 0 输出 0 不输出 -0',
+            'number', '{{fixed(row.nz, 0)}}', $num, '0'],
+        ['fixed-n8-upper-bound', 'n 范围上界 8：0.123456789 n8 → 0.12345679',
+            'number', '{{fixed(row.w, 8)}}', $num, '0.12345679'],
+        ['percent-times-100-default', 'percent 乘 100 缺省 0 位：0.826 → 83%',
+            'number', '{{percent(row.p)}}', $num, '83%'],
+        ['percent-with-n', 'percent 带 n：0.826 n2 → 82.60%',
+            'number', '{{percent(row.p, 2)}}', $num, '82.60%'],
+        ['percent-negative', '负百分比：-0.826 → -83%',
+            'number', '{{percent(row.pn)}}', $num, '-83%'],
+        ['percent-shift-two-decimals', '×100 = 小数点右移两位（十进制字符串语义，无二进制误差）',
+            'number', '{{percent(row.v)}}', $num, '123450%'],
+        ['number-strict-decimal-string', '严格十进制串收：解析为值后同管线格式化',
+            'number', '{{number(row.s)}}', $num, '1,234.5'],
+        ['number-leading-zeros-normalized', '前导零按值归一：007 → 7',
+            'number', '{{number(row.s007)}}', $num, '7'],
+        ['fixed-strict-string', '严格十进制串进定点管线',
+            'number', '{{fixed(row.sf, 3)}}', $num, '8.900'],
+        ['number-unparseable-passthrough', '非空不可解析（科学计数法）= 原文直通',
+            'number', '{{number(row.bad)}}', $num, '1e3'],
+        ['number-empty-value-empty-output', '空串输入 = 空串信号',
+            'number', 'x{{number(row.empty)}}', $num, 'x'],
+        ['number-missing-field-empty-output', '字段缺失 = 空串信号',
+            'number', '{{number(row.nope)}}', $num, ''],
+        ['number-bool-type-mismatch', 'bool 落参数位 = 报错',
+            'number', '{{number(row.flag)}}', $num, ['errorCode' => 'expression_type_mismatch']],
+        ['number-container-type-mismatch', '数组落参数位 = 报错',
+            'number', '{{number(row.tags)}}', $num, ['errorCode' => 'expression_type_mismatch']],
+        ['number-n-out-of-range', 'n 超界（>8）= 语义层 fail-fast',
+            'number', '{{number(row.v, 9)}}', $num, ['errorCode' => 'expression_syntax_error']],
+        ['number-n-non-integer', '非整数 n = 语法错',
+            'number', '{{fixed(row.f, 2.5)}}', $num, ['errorCode' => 'expression_syntax_error']],
+        ['number-n-negative', '数字字面量无符号：负数 n 在文法层即错',
+            'number', '{{number(row.v, -1)}}', $num, ['errorCode' => 'expression_syntax_error']],
+        ['number-zero-args-syntax-error', '零参调用 = 参数个数不符',
+            'number', '{{number()}}', $num, ['errorCode' => 'expression_syntax_error']],
+        ['number-three-args-syntax-error', '≥3 参 = 参数个数不符',
+            'number', '{{number(row.v, 1, 2)}}', $num, ['errorCode' => 'expression_syntax_error']],
+        ['number-second-arg-string', '数字族第二参须为数字字面量',
+            'number', "{{number(row.v, '2')}}", $num, ['errorCode' => 'expression_syntax_error']],
+        ['number-second-arg-path', '第二参不接受路径（v1 签名只消费字符串与数字字面量）',
+            'number', '{{number(row.v, row.n)}}', $num, ['errorCode' => 'expression_syntax_error']],
+        ['number-first-arg-string-syntax-error', '首参文法层钉死为路径：格式化常量是伪场景',
+            'number', "{{number('123')}}", $num, ['errorCode' => 'expression_syntax_error']],
+
+        // ---- value 组：调用与既有面混排（双族混合上下文） ----
+        ['calls-mix-with-literals-and-paths', '调用片段与字面/路径片段混排',
+            'value', "编号：{{number(row.i, 0)}}（{{date(row.day, 'YYYY年')}}）", $num, '编号：1,234,567（2026年）'],
     ];
+}
+
+/**
+ * 日期 token 转译表（fixture dateTokens，v2 增量）：PHP 内置表（DateFormat）权威导出，
+ * sample 钉死 spec §3.1 样例（星期日），逐 token 断言期望输出并自检
+ */
+function dateTokensSection(): array
+{
+    $sample = '2026-10-11 14:30:05';
+    $expects = [
+        'YYYY' => '2026', 'YY' => '26',
+        'MM' => '10', 'M' => '10',
+        'DD' => '11', 'D' => '11',
+        'HH' => '14', 'H' => '14',
+        'mm' => '30', 'm' => '30',
+        'ss' => '05', 's' => '5',
+        'dddd' => '星期日', 'ddd' => '周日',
+    ];
+
+    $dt = DateFormat::parseIso($sample);
+    if ($dt === null) {
+        throw new RuntimeException("dateTokens 样例 {$sample} 解析失败");
+    }
+
+    $rows = [];
+    foreach (DateFormat::tokenTable() as $entry) {
+        $token = $entry['token'];
+        $actual = DateFormat::format($token, $dt);
+        if ($actual !== $expects[$token]) {
+            throw new RuntimeException("token {$token}：实际输出「{$actual}」与钉稿期望「{$expects[$token]}」不符");
+        }
+        $rows[] = ['token' => $token, 'semantics' => $entry['semantics'], 'expect' => $actual];
+    }
+
+    return ['sample' => $sample, 'rows' => $rows];
 }
 
 /** 导出单个求值用例并自检：PHP 实际行为与 authored 期望不符直接失败 */
 function exportExpressionCase(array $case): array
 {
-    [$name, $description, $template, $context, $expect] = $case;
+    [$name, $description, $group, $template, $context, $expect] = $case;
 
     try {
         $result = (new InterpolationEvaluator())->evaluate($template, $context);
@@ -138,6 +410,7 @@ function exportExpressionCase(array $case): array
     return [
         'name' => $name,
         'description' => $description,
+        'group' => $group,
         'template' => $template,
         'context' => $context,
         'expect' => $expectOut,
@@ -375,18 +648,22 @@ if (!is_dir($outDir) && !mkdir($outDir, 0755, true)) {
 $documents = [
     'expression-eval.json' => [
         'meta' => [
-            'contract' => 'expression-eval v1',
+            'contract' => 'expression-eval v2',
             'generator' => 'php-canvas-next/scripts/export-hydrate-fixtures.php',
             'notes' => [
-                '默认求值器（受限插值）语义用例，语义源 php-canvas-next tests/Expression/InterpolationEvaluatorTest.php 逐用例平移；',
+                '默认求值器（受限插值）语义用例，语义源 php-canvas-next tests/Expression 逐用例平移；',
                 'context 形状为契约层钉定（spec §3.2）：row 键 = 行命名空间、裸名 = 数据集根键、$index（自 1 起）/$root 保留名；',
-                '缺字段/null = 空串信号（字段类兜底/报错策略由填充器施加）；数组/对象落到标量位 = expression_type_mismatch；',
-                'expect = 求值结果串 | {errorCode}；code 清单见 spec §5.2，三端一致性抓手；',
-                '数值字符串化只锁常规区间（整数/常规小数）；极端浮点（科学计数法阈值）的格式化语义归求值器 spec effort，不入 fixture；',
+                'v2 增量 = 每条加 group 字段（value|date|number，既有取值用例归 value）+ 顶层 dateTokens 转译表；内建函数 v1 = date/number/fixed/percent；',
+                'dateTokens：PHP 内置表（DateFormat）权威导出，Go 端内置同构表、fixture 断言锁漂移；sample 钉死 2026-10-11 14:30:05（星期日）；',
+                '分轴哲学（spec §0）：缺字段/null/空串 = 空串信号、不可解析 = 原文直通（值面宽松）；未知函数/参数个数/结构错/n 超界/格式串白名单外字母 fail-fast，全部并入 expression_syntax_error，零新 code（spec §5.2）；',
+                'bool/数组/对象落函数参数位 = expression_type_mismatch（bool 字符串化双端不一致，直通无法对齐）；',
+                '日期可解析输入收 3 种无时区 ISO 形态（wall clock），时间戳不收；数字族十进制字符串舍入（half-up 朝 +∞），',
+                '数值字符串化/十进制语义只锁常规区间（整数/常规小数）；极端浮点（科学计数法阈值）不入 fixture、不保证双端一致（spec §4.3）；',
                 '再生成: go-canvas 仓 make hydrate-fixtures（需本机 PHP 8.3）',
             ],
         ],
         'cases' => array_map('exportExpressionCase', expressionCases()),
+        'dateTokens' => dateTokensSection(),
     ],
     'expand-semantics.json' => [
         'meta' => [
