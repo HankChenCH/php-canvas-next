@@ -474,6 +474,27 @@ function singleTextTemplateTable(string $expression, string $rowsPath): TableLay
     return $table;
 }
 
+/** 单图片格模板表 helper：资源单值门合法形态（行上下文 $index）聚焦用例 */
+function singleImageTemplateTable(string $expression): TableLayer
+{
+    $row = (new TableRowTemplate())->setHeight(40);
+    $cell = (new TableCellLayer())->setWidth(160)->setHeight(40);
+    $cell->addTemplateContentLayer(ImageLayer::make(160, 40)->setExpression($expression));
+    $row->addCell($cell);
+
+    $table = TableLayer::make(320, 200);
+    $table->setRowsPath('items');
+    $table->setTemplate($row);
+
+    return $table;
+}
+
+/** 独立图片图层画布 helper：资源单值门根上下文聚焦用例（语源 CanvasHydratorTest 违例表） */
+function singleImageCanvas(string $expression): Canvas
+{
+    return Canvas::make(320, 100, ImageLayer::make(60, 60)->setExpression($expression));
+}
+
 /** QR 绑定面用例表：锁 expression 条件写键（求值后键移除） */
 function qrTemplateTable(): TableLayer
 {
@@ -553,11 +574,12 @@ function hydrateCases(): array
             320,
             100,
             TextLayer::make(200, 30)->setExpression('订单号：{{orderNo}}')->setFont('', 12, '#000'),
-            ImageLayer::make(60, 60)->setExpression('{{orderNo}}.png'),
-            (new QrCodeLayer())->setWidth(60)->setHeight(60)->setExpression('{{orderNo}}-qr')
+            ImageLayer::make(60, 60)->setExpression('{{orderNo}}'),
+            (new QrCodeLayer())->setWidth(60)->setHeight(60)->setExpression('{{$root.orderNo}}')
         )->graph(), $mainDataset, null,
             'independent-layers-root-context',
-            '独立图层（非行循环）根上下文求值：全绑定面 Text/Image/Qr'],
+            '独立图层（非行循环）根上下文求值：全绑定面 Text/Image/Qr；'
+            . '资源两类表达式为单值裸路径（ADR 0020 单值门合法形态，$root. 前缀放行）'],
         [$v1Graph, $mainDataset, null,
             'v1-table-marked-content-root-scope',
             'V1 表（rows only）标记内容在根作用域求值：行/格/内容同作用域传递'],
@@ -593,7 +615,33 @@ function hydrateCases(): array
             '数据集根级 $ 前缀键名 = 报错'],
         [$mainGraph, ['order' => ['items' => [['name' => '张三']]]], 'expression_empty_resource',
             'empty-resource-expression',
-            '资源类字段（Image src）求值空串 = 报错（空 URL 无意义，fail-fast 优于错误后移到物化）'],
+            '资源类字段（Image src）语法合法单路径但求值空串 = 报错（单值门放行后落 empty_resource：'
+            . '空 URL 无意义，fail-fast 优于错误后移到物化）'],
+        [singleImageCanvas('{{orderNo}}')->graph(), ['orderNo' => 'A2026-001'], null,
+            'resource-single-bare-path-legal',
+            '资源单值门（ADR 0020）合法形态：恰一个 {{...}} 闭合片段 + 裸点路径，正常求值并解除标记'],
+        [singleImageCanvas('{{$root.orderNo}}')->graph(), ['orderNo' => 'A2026-001'], null,
+            'resource-root-escape-path-legal',
+            '资源单值门合法形态：$root. 前缀同为裸点路径'],
+        [Canvas::make(320, 400, singleImageTemplateTable('{{$index}}'))->graph(),
+            ['items' => [['x' => 1], ['x' => 2]]], null,
+            'resource-index-path-legal-row-context',
+            '资源单值门合法形态：$index 保留名（行上下文，自 1 起）'],
+        [singleImageCanvas('{{orderNo}}{{orderNo}}')->graph(), ['orderNo' => 'A2026-001'], 'expression_resource_single_ref',
+            'resource-multi-fragment-violation',
+            '资源单值门违例：多片段拼接（文本插值语义在资源面废除，求值端 fail-fast）'],
+        [singleImageCanvas('{{orderNo}}.png')->graph(), ['orderNo' => 'A2026-001'], 'expression_resource_single_ref',
+            'resource-literal-outside-violation',
+            '资源单值门违例：片段外字面（存量拼接 URL 形态再渲染 fail-fast，0.x 契约窗口接受）'],
+        [singleImageCanvas('{{number(orderNo, 2)}}')->graph(), ['orderNo' => 'A2026-001'], 'expression_resource_single_ref',
+            'resource-function-call-violation',
+            '资源单值门违例：内建函数调用（格式化标量不是数据端备好的资源引用）'],
+        [singleImageCanvas('{{}}')->graph(), ['orderNo' => 'A2026-001'], 'expression_resource_single_ref',
+            'resource-empty-fragment-violation',
+            '资源单值门违例：空片段（门先于求值器，不落 expression_syntax_error）'],
+        [singleImageCanvas('{{missing}}.png')->graph(), ['orderNo' => 'A'], 'expression_resource_single_ref',
+            'resource-violation-precedes-empty-check',
+            '顺序钉定：校验在求值前——违例形态即使求值必空也报 single_ref 而非 empty_resource'],
         [Canvas::make(320, 400, singleTextTemplateTable('{{row.tags}}', 'items'))->graph(),
             ['items' => [['tags' => ['a', 'b']]]], 'expression_type_mismatch',
             'type-mismatch-in-row-context',
@@ -659,6 +707,7 @@ $documents = [
                 'bool/数组/对象落函数参数位 = expression_type_mismatch（bool 字符串化双端不一致，直通无法对齐）；',
                 '日期可解析输入收 3 种无时区 ISO 形态（wall clock），时间戳不收；数字族十进制字符串舍入（half-up 朝 +∞），',
                 '数值字符串化/十进制语义只锁常规区间（整数/常规小数）；极端浮点（科学计数法阈值）不入 fixture、不保证双端一致（spec §4.3）；',
+                '资源表达式单值门（ADR 0020）不在求值器：文本插值语义零变化，违例/合法形态的 hydrate 级判定锁在 expand-semantics.json（expression_resource_single_ref）；',
                 '再生成: go-canvas 仓 make hydrate-fixtures（需本机 PHP 8.3）',
             ],
         ],
@@ -675,6 +724,8 @@ $documents = [
                 '解码期错误（template_rows_conflict/rows_path_missing）与填充期错误同管线表达，expect = {graph} | {errorCode}（spec §5.2）；',
                 'dataset null = 未绑数据集恒等直通（含模板表）；无标记无模板画布恒等直通；',
                 '填充产物 graph 已含 V1 高度耦合重放结果（行高定稿/固定格内容压平），填充永不回写源 graph；',
+                '资源表达式单值门（ADR 0020）：已标记 Image/Qr 的 expression 必须恰为一个 {{...}} 闭合片段 + 裸点路径'
+                . '（$index/$root. 前缀合法），违例 errorCode expression_resource_single_ref，校验先于求值与 empty_resource 空串检查；',
                 '再生成: go-canvas 仓 make hydrate-fixtures（需本机 PHP 8.3）',
             ],
         ],

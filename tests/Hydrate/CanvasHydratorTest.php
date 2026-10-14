@@ -8,6 +8,7 @@ use HankChen\CanvasNext\Compiler\DiagnosticCollector;
 use HankChen\CanvasNext\Exception\HydrateException;
 use HankChen\CanvasNext\Hydrate\CanvasHydrator;
 use HankChen\CanvasNext\Layer\ImageLayer;
+use HankChen\CanvasNext\Layer\QrCodeLayer;
 use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableCellLayer;
 use HankChen\CanvasNext\Layer\TableRowLayer;
@@ -144,7 +145,8 @@ class CanvasHydratorTest extends CanvasTestCase
             320,
             100,
             TextLayer::make(200, 30)->setExpression('订单号：{{orderNo}}')->setFont('', 12, '#000'),
-            ImageLayer::make(60, 60)->setExpression('{{orderNo}}.png')
+            ImageLayer::make(60, 60)->setExpression('{{orderNo}}'),
+            (new QrCodeLayer())->setWidth(60)->setHeight(60)->setExpression('{{$root.orderNo}}')
         );
 
         $hydrated = $this->hydrator->hydrate($canvas, $this->dataset());
@@ -156,8 +158,13 @@ class CanvasHydratorTest extends CanvasTestCase
 
         /** @var ImageLayer $image */
         $image = $hydrated->getLayers()[1];
-        $this->assertSame('A2026-001.png', $image->getImage());
+        $this->assertSame('A2026-001', $image->getImage());
         $this->assertNull($image->getExpression());
+
+        /** @var QrCodeLayer $qr */
+        $qr = $hydrated->getLayers()[2];
+        $this->assertSame('A2026-001', $qr->getText());
+        $this->assertNull($qr->getExpression());
     }
 
     public function testV1TableMarkedContentEvaluatesAtRootScope(): void
@@ -282,6 +289,140 @@ class CanvasHydratorTest extends CanvasTestCase
         } catch (HydrateException $e) {
             $this->assertSame('expression_empty_resource', $e->getErrorCode());
         }
+    }
+
+    /** 资源单值门合法形态（ADR 0020）：恰一个 {{...}} 闭合片段 + 裸点路径内容 */
+    private function imageTemplateTable(string $expression): TableLayer
+    {
+        $row = (new TableRowTemplate())->setHeight(40);
+        $cell = (new TableCellLayer())->setWidth(160)->setHeight(40);
+        $cell->addTemplateContentLayer(ImageLayer::make(160, 40)->setExpression($expression));
+        $row->addCell($cell);
+
+        $table = TableLayer::make(320, 200);
+        $table->setRowsPath('order.items');
+        $table->setTemplate($row);
+
+        return $table;
+    }
+
+    public function testResourceSingleBarePathIsLegal(): void
+    {
+        // 五类形态之合法单路径：根上下文裸名放行（{{row.avatar}} 行上下文形态由主用例覆盖）
+        $canvas = Canvas::make(320, 100, ImageLayer::make(60, 60)->setExpression('{{orderNo}}'));
+
+        $hydrated = $this->hydrator->hydrate($canvas, ['orderNo' => 'A2026-001']);
+
+        /** @var ImageLayer $image */
+        $image = $hydrated->getLayers()[0];
+        $this->assertSame('A2026-001', $image->getImage());
+        $this->assertNull($image->getExpression());
+    }
+
+    public function testResourceIndexPathLegalInRowContext(): void
+    {
+        // $index 保留名同为裸点路径，行上下文放行（自 1 起）
+        $hydrated = $this->hydrator->hydrate(
+            Canvas::make(320, 400, $this->imageTemplateTable('{{$index}}')),
+            $this->dataset()
+        );
+
+        /** @var TableLayer $table */
+        $table = $hydrated->getLayers()[0];
+        /** @var ImageLayer $image1 */
+        $image1 = $table->getRows()[0]->getCells()[0]->getContentLayer();
+        $this->assertSame('1', $image1->getImage());
+        /** @var ImageLayer $image2 */
+        $image2 = $table->getRows()[1]->getCells()[0]->getContentLayer();
+        $this->assertSame('2', $image2->getImage());
+    }
+
+    /** @return array<string, array{string}> 五类违例形态（issue 01）+ 边角（空白片段/未闭合） */
+    public static function resourceViolationProvider(): array
+    {
+        return [
+            '多片段拼接' => ['{{orderNo}}{{orderNo}}'],
+            '片段外字面（尾缀）' => ['{{orderNo}}.png'],
+            '片段外字面（前缀）' => ['https://cdn/{{orderNo}}'],
+            '函数调用' => ['{{number(orderNo, 2)}}'],
+            '空片段' => ['{{}}'],
+            '纯空白片段' => ['{{  }}'],
+            '未闭合片段' => ['{{orderNo'],
+        ];
+    }
+
+    /**
+     * @dataProvider resourceViolationProvider
+     */
+    public function testResourceExpressionViolationFailsFast(string $expression): void
+    {
+        $canvas = Canvas::make(320, 100, ImageLayer::make(60, 60)->setExpression($expression));
+
+        try {
+            $this->hydrator->hydrate($canvas, $this->dataset());
+            $this->fail("资源表达式「{$expression}」违反单值裸路径必须报错");
+        } catch (HydrateException $e) {
+            $this->assertSame('expression_resource_single_ref', $e->getErrorCode());
+        }
+    }
+
+    public function testResourceViolationPrecedesEmptyResourceCheck(): void
+    {
+        // 顺序钉定：校验在求值前——违例形态即使求值必空也报 single_ref，而非 empty_resource
+        $canvas = Canvas::make(320, 100, ImageLayer::make(60, 60)->setExpression('{{missing}}.png'));
+
+        try {
+            $this->hydrator->hydrate($canvas, ['orderNo' => 'A']);
+            $this->fail('违例形态必须在求值前报错');
+        } catch (HydrateException $e) {
+            $this->assertSame('expression_resource_single_ref', $e->getErrorCode());
+        }
+    }
+
+    public function testQrCodeViolationFailsFast(): void
+    {
+        // 二维码静默错编是该门的首要防线（渲染零报错、扫码才暴露的实测缺陷）
+        $canvas = Canvas::make(320, 100, (new QrCodeLayer())->setWidth(60)->setHeight(60)->setExpression('{{orderNo}}-qr'));
+
+        try {
+            $this->hydrator->hydrate($canvas, $this->dataset());
+            $this->fail('二维码违例表达式必须报错');
+        } catch (HydrateException $e) {
+            $this->assertSame('expression_resource_single_ref', $e->getErrorCode());
+        }
+    }
+
+    public function testTextLayerInterpolationUnchangedBySingleRefGate(): void
+    {
+        // 门只管资源两类：文本层多片段拼接 + 字面混排照旧插值（spec 裁决 3：插值语义不动）
+        $canvas = Canvas::make(
+            320,
+            100,
+            TextLayer::make(200, 30)->setExpression('单号 {{orderNo}} 与 {{orderNo}}')->setFont('', 12, '#000')
+        );
+
+        $hydrated = $this->hydrator->hydrate($canvas, ['orderNo' => 'A2026-001']);
+
+        /** @var TextLayer $text */
+        $text = $hydrated->getLayers()[0];
+        $this->assertSame('单号 A2026-001 与 A2026-001', $text->getText());
+    }
+
+    public function testUnmarkedResourceLiteralPassthroughUnchanged(): void
+    {
+        // 未标记字面直通不动：含 {{ 的字面 src 在其他图层有绑定时也不被求值、不被校验
+        $canvas = Canvas::make(
+            320,
+            100,
+            ImageLayer::make(60, 60)->setImage('https://cdn/{{orderNo}}.png'),
+            TextLayer::make(200, 30)->setExpression('{{orderNo}}')->setFont('', 12, '#000')
+        );
+
+        $hydrated = $this->hydrator->hydrate($canvas, ['orderNo' => 'A2026-001']);
+
+        /** @var ImageLayer $image */
+        $image = $hydrated->getLayers()[0];
+        $this->assertSame('https://cdn/{{orderNo}}.png', $image->getImage());
     }
 
     public function testTypeMismatchInRowContextThrows(): void

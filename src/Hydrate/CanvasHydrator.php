@@ -188,10 +188,18 @@ class CanvasHydrator
             return; // 绑定面仅三类内容层（spec §3.1）
         }
 
-        $context = $rowNamespace === null ? $root : $rowNamespace + $root;
-        $result = $this->evaluator->evaluate((string) $data['expression'], $context);
+        $expression = (string) $data['expression'];
 
-        if (($type === ImageLayer::TYPE || $type === QrCodeLayer::TYPE) && $result === '') {
+        // 资源类单值门（ADR 0020）：求值前 fail-fast，违例不可能被求值器救回
+        $isResource = $type === ImageLayer::TYPE || $type === QrCodeLayer::TYPE;
+        if ($isResource) {
+            $this->assertSingleResourceRef($expression);
+        }
+
+        $context = $rowNamespace === null ? $root : $rowNamespace + $root;
+        $result = $this->evaluator->evaluate($expression, $context);
+
+        if ($isResource && $result === '') {
             // 资源类缺字段/null/求值空串一律报错：空 URL/空码无意义，fail-fast 优于错误后移到物化
             throw new HydrateException('expression_empty_resource', "expression_empty_resource: {$data['expression']}");
         }
@@ -213,6 +221,25 @@ class CanvasHydrator
             unset($data['expression']); // Image/Qr 条件写键
         }
         $node['data'] = $data;
+    }
+
+    /**
+     * 资源表达式单值门（ADR 0020）：已标记 Image/Qr 的 expression 必须恰为一个 {{...}} 闭合片段
+     * 且占满整串，片段内容为裸点路径——禁多片段拼接、禁片段外字面、禁内建函数调用
+     * （格式化标量不是数据端备好的资源引用：产物要么物化失败、要么静默错编）、禁空片段。
+     * $index/$root. 前缀同为裸点路径，放行；门只做语法判定，与数据集无关
+     */
+    private function assertSingleResourceRef(string $expression): void
+    {
+        $path = preg_match('/^\{\{([^{}]*)\}\}$/', $expression, $matches) === 1
+            ? trim($matches[1])
+            : null;
+        if ($path === null || $path === '' || str_contains($path, '(')) {
+            throw new HydrateException(
+                'expression_resource_single_ref',
+                "expression_resource_single_ref: {$expression}"
+            );
+        }
     }
 
     /**
