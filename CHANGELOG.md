@@ -2,6 +2,11 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 1.2.0 - 2026-10-15
+
+- 资源表达式单值裸路径门（ADR 0020）：已标记 Image/Qr 的 expression 求值前校验须恰为一个 `{{...}}` 闭合片段 + 裸点路径（`$index`/`$root.` 前缀合法），禁多片段拼接、片段外字面、内建函数与空片段；违例抛 `HydrateException` 新错误码 `expression_resource_single_ref`，先于求值与 `expression_empty_resource` 空串检查（测试钉序）。文本层插值语义与未标记字面直通零变化
+- 共享 fixture `expand-semantics` 增资源门用例 8 条（合法 3 + 违例 4 + 顺序钉定 1），`independent-layers-root-context` 改合法形态
+
 ## 1.1.0 - 2026-10-11
 
 - 表达式内建函数求值器（v1 方法面，ADR 0018）：mustache 插值内函数调用形态 `{{date(row.d, 'YYYY年MM月DD日')}}`，签名 `date(path[, format])` / `number(path[, n])` / `fixed(path[, n])` / `percent(path[, n])`
