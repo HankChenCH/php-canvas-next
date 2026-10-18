@@ -4,7 +4,6 @@ namespace HankChen\CanvasNext\Tests\Renderer;
 
 use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\CanvasBackground;
-use HankChen\CanvasNext\Contracts\DownloaderInterface;
 use HankChen\CanvasNext\Exception\MaterializeException;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
@@ -186,11 +185,6 @@ class CanvasBackgroundPaintingTest extends CanvasTestCase
 final class NoPreTraversalResolverSpy extends ResourceResolver
 {
     public int $backgroundCalls = 0;
-
-    public function __construct(?DownloaderInterface $downloader = null)
-    {
-        parent::__construct($downloader);
-    }
 
     public function resolve(Cancellation $ctx, Canvas $canvas): void
     {
