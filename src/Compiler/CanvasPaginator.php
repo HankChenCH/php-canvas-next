@@ -201,7 +201,8 @@ class CanvasPaginator
 
         // 每页组装：非驱动图层逐页原样复制（源坐标不动，页界外位图裁剪自理），
         // 驱动表壳保留声明、行切片替换——PHP 数组值语义天然隔离各页 graph，
-        // fromGraph 重建保证页间零共享可变结构
+        // fromGraph 重建保证页间零共享可变结构。
+        // canvas 键手工重组：背景必须显式携带每页（ADR 0022 易漏点 1）
         $pages = [];
         foreach ($pageRowIndexes as $rowIndexes) {
             $pageTableGraph = $tableGraph;
@@ -210,8 +211,16 @@ class CanvasPaginator
             $pageLayers = $graph['layers'];
             $pageLayers[$driverIndex] = $pageTableGraph;
 
+            $pageCanvas = [
+                'width' => $canvas->getWidth(),
+                'height' => $this->pageHeight,
+            ];
+            if (isset($graph['canvas']['background'])) {
+                $pageCanvas['background'] = $graph['canvas']['background'];
+            }
+
             $pages[] = Canvas::fromGraph([
-                'canvas' => ['width' => $canvas->getWidth(), 'height' => $this->pageHeight],
+                'canvas' => $pageCanvas,
                 'layers' => $pageLayers,
             ]);
         }

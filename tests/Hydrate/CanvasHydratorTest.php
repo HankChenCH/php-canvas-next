@@ -3,6 +3,7 @@
 namespace HankChen\CanvasNext\Tests\Hydrate;
 
 use HankChen\CanvasNext\Canvas;
+use HankChen\CanvasNext\CanvasBackground;
 use HankChen\CanvasNext\Compiler\Diagnostic;
 use HankChen\CanvasNext\Compiler\DiagnosticCollector;
 use HankChen\CanvasNext\Exception\HydrateException;
@@ -524,5 +525,26 @@ class CanvasHydratorTest extends CanvasTestCase
 
         $this->assertSame($canvas, $hydrated);
         $this->assertSame([], $collector->all());
+    }
+
+    // ------------------------------------------------------------------
+    // 画布背景透传（ADR 0022 / spec §3）：背景静态，不进 hydrate 改写面与表达式白名单
+    // ------------------------------------------------------------------
+
+    public function testBackgroundPassedThroughUntouchedWhileLayersAreHydrated(): void
+    {
+        // 图层标记求值照常进行；背景含 mustache 形态也原样透传（数据驱动底图走图层级，
+        // 两形态并存合法——同形引用在层上被求值、在背景上保持字面）
+        $canvas = Canvas::make(
+            320,
+            100,
+            ImageLayer::make(320, 40)->setExpression('{{order.avatar}}'),
+        )->setBackground(new CanvasBackground('{{order.color}}', '{{order.avatar}}'));
+
+        $hydrated = $this->hydrator->hydrate($canvas, ['order' => ['avatar' => '/tmp/a.png', 'color' => '#ff0000']]);
+
+        $this->assertSame('/tmp/a.png', $hydrated->getLayers()[0]->getImage());
+        $this->assertSame(['color' => '{{order.color}}', 'image' => '{{order.avatar}}'], $hydrated->graph()['canvas']['background']);
+        $this->assertSame($canvas->graph()['canvas']['background'], $hydrated->graph()['canvas']['background']);
     }
 }

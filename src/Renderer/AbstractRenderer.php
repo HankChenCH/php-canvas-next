@@ -41,6 +41,7 @@ abstract class AbstractRenderer implements RendererInterface
     final public function render(Cancellation $ctx, Canvas $canvas): mixed
     {
         $this->begin($canvas->getWidth(), $canvas->getHeight());
+        $this->paintBackground($ctx, $canvas);
         foreach ($canvas->getLayers() as $layer) {
             // 根层循环检查点：每图层分派前轮询取消信号
             $ctx->throwIfRequested();
@@ -51,6 +52,33 @@ abstract class AbstractRenderer implements RendererInterface
         }
 
         return $this->end();
+    }
+
+    /**
+     * 画布背景铺装（ADR 0022 / spec §4）：插入点 = 根层循环之前，先色后图——
+     * 背景之下无物（画布初始透明保留），背景图透明区露背景色。
+     * 背景图画布级惰性物化（绘制分派前、失败即抛、产物整体丢弃），cover 铺满画布矩形
+     * （drawImage 原语自带 cover 语义）；无背景零开销。
+     * renderLayer() 单图层便捷入口不画背景（无画布矩形语义）
+     */
+    private function paintBackground(Cancellation $ctx, Canvas $canvas): void
+    {
+        $background = $canvas->getBackground();
+        if ($background === null) {
+            return;
+        }
+
+        $color = $background->getColor();
+        if ($color !== null) {
+            // 先铺色：复用 drawRect 原语，背景无边框
+            $this->drawRect(0, 0, $canvas->getWidth(), $canvas->getHeight(), $color, []);
+        }
+
+        $image = $background->getImage();
+        if ($image !== null) {
+            $src = $this->resolver->resolveBackground($ctx, $image);
+            $this->drawImage($src, 0, 0, $canvas->getWidth(), $canvas->getHeight());
+        }
     }
 
     /**

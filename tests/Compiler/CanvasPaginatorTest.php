@@ -3,6 +3,7 @@
 namespace HankChen\CanvasNext\Tests\Compiler;
 
 use HankChen\CanvasNext\Canvas;
+use HankChen\CanvasNext\CanvasBackground;
 use HankChen\CanvasNext\Compiler\CanvasPaginator;
 use HankChen\CanvasNext\Exception\PaginateException;
 use HankChen\CanvasNext\Layer\TableLayer;
@@ -359,5 +360,39 @@ class CanvasPaginatorTest extends CanvasTestCase
         // 缺省键 = 分页关直通
         $off = CanvasPaginator::fromOptions([]);
         $this->assertSame([$canvas], $off->paginate($canvas));
+    }
+
+    // ------------------------------------------------------------------
+    // 画布背景透传（ADR 0022 / spec §5 易漏点 1）：split 手工重组 canvas 键必须显式携带 background
+    // ------------------------------------------------------------------
+
+    public function testSplitCarriesBackgroundToEveryPage(): void
+    {
+        $canvas = Canvas::make(320, 450, $this->standardTable())
+            ->setBackground(new CanvasBackground('#ffffff', 'bg.png'));
+
+        $pages = (new CanvasPaginator(pageHeight: 250))->paginate($canvas);
+
+        $this->assertCount(2, $pages);
+        foreach ($pages as $page) {
+            // 背景随 canvas 字段透传每页，分量与键序原样
+            $this->assertSame([
+                'width' => 320,
+                'height' => 250,
+                'background' => ['color' => '#ffffff', 'image' => 'bg.png'],
+            ], $page->graph()['canvas']);
+        }
+    }
+
+    public function testSplitWithoutBackgroundKeepsKeylessCanvasSection(): void
+    {
+        // 无背景存量分页：canvas 段保持两键形态（条件写键按设计保绿）
+        $canvas = Canvas::make(320, 450, $this->standardTable());
+
+        $pages = (new CanvasPaginator(pageHeight: 250))->paginate($canvas);
+
+        foreach ($pages as $page) {
+            $this->assertSame(['width' => 320, 'height' => 250], $page->graph()['canvas']);
+        }
     }
 }

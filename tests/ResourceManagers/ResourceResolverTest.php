@@ -123,4 +123,40 @@ class ResourceResolverTest extends CanvasTestCase
         $this->assertSame($first, $layer->getResolvedSrc());
         $this->assertFileExists($first);
     }
+
+    // ------------------------------------------------------------------
+    // 画布级物化入口（画布背景图，ADR 0022）：与 resolveLayer 同语义，返回路径而非回写图层
+    // ------------------------------------------------------------------
+
+    public function testResolveBackgroundDownloadsRemoteImageAndReturnsPath(): void
+    {
+        $resolver = $this->resolverWith('fake-image-bytes');
+        $url = 'https://cdn.example.com/img/bg.png';
+
+        $path = $resolver->resolveBackground(new NullCancellation(), $url);
+
+        $this->assertCount(1, $this->downloader->calls);
+        $this->assertSame($this->cacheDir('img_layers') . '/bg.png', $path);
+        $this->assertFileExists($path);
+    }
+
+    public function testResolveBackgroundLocalPathPassthrough(): void
+    {
+        $resolver = $this->resolverWith('should-not-be-used');
+
+        $this->assertSame('/tmp/local-bg.png', $resolver->resolveBackground(new NullCancellation(), '/tmp/local-bg.png'));
+        $this->assertCount(0, $this->downloader->calls);
+    }
+
+    public function testResolveBackgroundDownloadFailureThrows(): void
+    {
+        $resolver = $this->resolverWith(false);
+
+        try {
+            $resolver->resolveBackground(new NullCancellation(), 'https://cdn.example.com/missing.png');
+            $this->fail('背景物化下载失败必须抛错');
+        } catch (MaterializeException $e) {
+            $this->assertSame('resource_download_failed', $e->getErrorCode());
+        }
+    }
 }

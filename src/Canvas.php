@@ -14,6 +14,9 @@ class Canvas
     private int $width;
     private int $height;
 
+    /** 画布背景（ADR 0022）：null = 无背景（wire 整键不落）；渲染语义字段，不属图层树 */
+    private ?CanvasBackground $background = null;
+
     /** @var AbstractLayer[] 按 priority 降序（等优先级保持插入序） */
     private array $layers = [];
 
@@ -43,6 +46,21 @@ class Canvas
         return $this->height;
     }
 
+    /**
+     * 声明画布背景（ADR 0022）：null 或空背景（两分量皆空）与无背景同态——wire 整键不落
+     */
+    public function setBackground(?CanvasBackground $background): static
+    {
+        $this->background = ($background !== null && $background->isEmpty()) ? null : $background;
+
+        return $this;
+    }
+
+    public function getBackground(): ?CanvasBackground
+    {
+        return $this->background;
+    }
+
     public function addLayer(AbstractLayer $layer): static
     {
         $this->layers[] = $layer;
@@ -63,15 +81,22 @@ class Canvas
     }
 
     /**
-     * 序列化为结构树（无损），可 JSON 持久化、跨渲染端复用
+     * 序列化为结构树（无损），可 JSON 持久化、跨渲染端复用。
+     * canvas 段键序钉死 width, height, background（background 条件写键，ADR 0022）
      */
     public function graph(): array
     {
+        $canvas = [
+            'width' => $this->width,
+            'height' => $this->height,
+        ];
+        $background = $this->background?->graph();
+        if ($background !== null) {
+            $canvas['background'] = $background;
+        }
+
         return [
-            'canvas' => [
-                'width' => $this->width,
-                'height' => $this->height,
-            ],
+            'canvas' => $canvas,
             'layers' => array_map(
                 static fn (AbstractLayer $layer) => $layer->graph(),
                 $this->layers
@@ -80,7 +105,7 @@ class Canvas
     }
 
     /**
-     * 从 graph() 结构重建画布（含全部图层与尺寸同步）
+     * 从 graph() 结构重建画布（含全部图层与尺寸同步）；background 宽容读，缺键回填空
      */
     public static function fromGraph(array $graph): self
     {
@@ -88,6 +113,7 @@ class Canvas
             intval($graph['canvas']['width'] ?? 0),
             intval($graph['canvas']['height'] ?? 0)
         );
+        $canvas->setBackground(CanvasBackground::fromGraph($graph['canvas']['background'] ?? null));
 
         foreach ($graph['layers'] ?? [] as $layerGraph) {
             $canvas->addLayer(LayerFactory::fromGraph($layerGraph));

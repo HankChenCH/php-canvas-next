@@ -56,6 +56,19 @@ class ResourceResolver
         };
     }
 
+    /**
+     * 画布级物化入口（画布背景图，ADR 0022）：与 resolveLayer 同语义——
+     * 物化前检查点、远程引用下载缓存、本地路径直通；背景不是图层、无 setter 回写，
+     * 物化结果以返回值交渲染器，失败即抛 MaterializeException
+     */
+    public function resolveBackground(Cancellation $ctx, string $image): string
+    {
+        // 物化前检查点：任何下载 I/O 发生前轮询取消信号（与 resolveLayer 同位）
+        $ctx->throwIfRequested();
+
+        return $this->materializeRemoteImage($ctx, $image);
+    }
+
     public function resolve(Cancellation $ctx, Canvas $canvas): void
     {
         foreach ($canvas->getLayers() as $layer) {
@@ -91,8 +104,17 @@ class ResourceResolver
             return;
         }
 
+        $layer->setResolvedSrc($this->materializeRemoteImage($ctx, $src));
+    }
+
+    /**
+     * 远程图片引用 → 本地缓存路径（本地路径直通）；图层与画布背景共用同一下载/
+     * 缓存/错误语义（cachePath 按.basename 键，命中跳过下载）
+     */
+    private function materializeRemoteImage(Cancellation $ctx, string $src): string
+    {
         if (filter_var($src, FILTER_VALIDATE_URL) === false) {
-            return; // 本地路径直接使用
+            return $src; // 本地路径直接使用
         }
 
         $path = $this->cachePath('img_layers', $src);
@@ -107,7 +129,7 @@ class ResourceResolver
             }
         }
 
-        $layer->setResolvedSrc($path);
+        return $path;
     }
 
     private function materializeFont(Cancellation $ctx, TextLayer $layer): void
