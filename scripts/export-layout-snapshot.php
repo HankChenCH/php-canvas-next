@@ -260,7 +260,43 @@ function buildCases(): array
             . ' named+visible 与无名默认三层对照',
             buildNameVisibleContract()
         ),
+        exportCase(
+            'image-fit-wire',
+            '图片层适配模式 fit wire parity（ADR 0023，go-canvas 工票 03）：spec.fit 条件写键——'
+            . '缺省（cover）整键不落、fit=contain 落键殿后 spec 末位（shape/align/position/fit）、'
+            . '未知枚举串原样透传保往返恒等；fit 与表达式标记正交（三键 data 形态 + spec.fit）。'
+            . '空引用图片层零物化只画盒，contain 收缩几何属渲染臂、由双端各自单测锁定',
+            buildImageFitWire()
+        ),
     ];
+}
+
+/**
+ * fit wire 契约用例（ADR 0023，go-canvas 工票 03）：同画布四层对照——
+ * 缺省（cover，整键不落）、fit=contain（落键殿后 spec 末位）、未知枚举串 fill
+ * （宽容透传保往返恒等）、表达式标记 + fit（fit 与 data 正交，随打标存活）。
+ * 空引用图片层零物化只画盒：快照锁定 wire 面，contain 收缩几何属渲染臂、
+ * 不进快照（内在尺寸读取属绘制分派期 I/O，双端各自单测锁定）
+ */
+function buildImageFitWire(): Canvas
+{
+    $default = ImageLayer::make(40, 24)
+        ->setPosition(0, 0);
+
+    $contain = ImageLayer::make(40, 24)
+        ->setFit(ImageLayer::FIT_CONTAIN)
+        ->setPosition(60, 0);
+
+    $unknown = ImageLayer::make(40, 24)
+        ->setFit('fill')
+        ->setPosition(120, 0);
+
+    $marked = ImageLayer::make(40, 24)
+        ->setExpression('{{row.photo}}')
+        ->setFit(ImageLayer::FIT_CONTAIN)
+        ->setPosition(180, 0);
+
+    return Canvas::make(240, 40, $default, $contain, $unknown, $marked);
 }
 
 /**
