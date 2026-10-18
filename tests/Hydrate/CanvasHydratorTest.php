@@ -168,6 +168,57 @@ class CanvasHydratorTest extends CanvasTestCase
         $this->assertNull($qr->getExpression());
     }
 
+    public function testFitPassesThroughHydrateUntouched(): void
+    {
+        // fit 是静态声明（ADR 0023）：不进求值面与表达式白名单，随 graph 改写原样透传
+        $canvas = Canvas::make(
+            320,
+            100,
+            ImageLayer::make(60, 60)->setExpression('{{orderNo}}')->setFit(ImageLayer::FIT_CONTAIN),
+            ImageLayer::make(60, 60)->setImage('/tmp/static.png')->setFit('fill')
+        );
+
+        $hydrated = $this->hydrator->hydrate($canvas, $this->dataset());
+
+        $graph = $hydrated->graph();
+        /** @var ImageLayer $marked */
+        $marked = $hydrated->getLayers()[0];
+        $this->assertSame('A2026-001', $marked->getImage());
+        $this->assertSame('contain', $marked->getFit());
+        $this->assertSame('contain', $graph['layers'][0]['spec']['fit']);
+        $this->assertSame(['valueType' => 'StaticValue', 'value' => 'A2026-001'], $graph['layers'][0]['data']);
+
+        /** @var ImageLayer $static */
+        $static = $hydrated->getLayers()[1];
+        $this->assertSame('fill', $static->getFit());
+        $this->assertSame('fill', $graph['layers'][1]['spec']['fit']);
+    }
+
+    public function testFitPassesThroughTemplateInstantiation(): void
+    {
+        // 模板表实例化路径（expand 语义同门）：模板子树格内容层的 fit 随行实例原样透传
+        $cell = (new TableCellLayer())->setWidth(160)->setHeight(40);
+        $cell->addTemplateContentLayer(
+            ImageLayer::make(160, 40)->setExpression('{{row.avatar}}')->setFit(ImageLayer::FIT_CONTAIN)
+        );
+        $row = (new TableRowTemplate())->setHeight(40);
+        $row->addCell($cell);
+        $table = TableLayer::make(320, 100, '#fff');
+        $table->setRowsPath('order.items');
+        $table->setTemplate($row);
+
+        $hydrated = $this->hydrator->hydrate(Canvas::make(320, 100, $table), $this->dataset());
+
+        $rows = $hydrated->getLayers()[0]->getRows();
+        $this->assertCount(2, $rows);
+        foreach ($rows as $rowNode) {
+            /** @var ImageLayer $image */
+            $image = $rowNode->getCells()[0]->getContentLayer();
+            $this->assertSame('contain', $image->getFit());
+        }
+        $this->assertSame('contain', $hydrated->graph()['layers'][0]['rows'][0]['cells'][0]['content']['spec']['fit']);
+    }
+
     public function testV1TableMarkedContentEvaluatesAtRootScope(): void
     {
         $table = TableLayer::make(320, 100, '#fff');

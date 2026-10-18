@@ -164,6 +164,20 @@ abstract class AbstractRenderer implements RendererInterface
 
         $src = $layer->getResolvedSrc();
         if ($src !== null) {
+            if ($layer->getFit() === ImageLayer::FIT_CONTAIN) {
+                // contain（ADR 0023）：按物化后源图内在比例收缩目标矩形再调原语
+                // （getimagesize 属绘制分派期 I/O，与 resolve 同批，@ 抑制损坏图告警——
+                // 读取失败按 cover 走，损坏图不因 fit 崩渲染）；未知 fit 值不在白名单，自然落 cover 分支
+                $size = @getimagesize($src);
+                if (is_array($size) && $size[0] > 0 && $size[1] > 0) {
+                    [$cx, $cy, $cw, $ch] = $layer->getContainRect($size[0], $size[1]);
+                    $this->drawImage($src, $x + $cx, $y + $cy, $cw, $ch);
+
+                    return;
+                }
+            }
+
+            // cover 路径（缺省/未知值降级/尺寸读取失败共用）：原语自带 cover 语义，零回归
             [$originX, $originY] = $layer->getImageOrigin();
             $this->drawImage($src, $x + $originX, $y + $originY, $layer->getContentWidth(), $layer->getContentHeight());
         }

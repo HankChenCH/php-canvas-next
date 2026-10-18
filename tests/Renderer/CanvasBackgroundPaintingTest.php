@@ -10,9 +10,9 @@ use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
 use HankChen\CanvasNext\Runtime\Cancellation;
 use HankChen\CanvasNext\Runtime\NullCancellation;
 use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
+use HankChen\CanvasNext\Tests\Support\CoordinateRecordingRenderer;
 use HankChen\CanvasNext\Tests\Support\FakeCancellation;
 use HankChen\CanvasNext\Tests\Support\FakeDownloader;
-use HankChen\CanvasNext\Tests\Support\RecordingTestRenderer;
 
 /**
  * 画布背景铺装契约（ADR 0022 / spec §4）：
@@ -41,29 +41,11 @@ class CanvasBackgroundPaintingTest extends CanvasTestCase
     }
 
     /**
-     * 坐标记录型后端：在 RecordingTestRenderer 之上追加绘制参数留痕
+     * 坐标记录型后端（绘制参数留痕），见 Support\CoordinateRecordingRenderer
      */
-    private function coordinateRenderer(ResourceResolver $resolver): RecordingTestRenderer
+    private function coordinateRenderer(ResourceResolver $resolver): CoordinateRecordingRenderer
     {
-        return new class($resolver) extends RecordingTestRenderer {
-            /** @var list<array{0: int, 1: int, 2: int, 3: int, 4: ?string}> */
-            public array $rects = [];
-
-            /** @var list<array{0: string, 1: int, 2: int, 3: int, 4: int}> */
-            public array $images = [];
-
-            protected function drawRect(int $x, int $y, int $width, int $height, ?string $bgColor, array $border): void
-            {
-                $this->rects[] = [$x, $y, $width, $height, $bgColor];
-                parent::drawRect($x, $y, $width, $height, $bgColor, $border);
-            }
-
-            protected function drawImage(string $src, int $x, int $y, int $width, int $height): void
-            {
-                $this->images[] = [$src, $x, $y, $width, $height];
-                parent::drawImage($src, $x, $y, $width, $height);
-            }
-        };
+        return new CoordinateRecordingRenderer($resolver);
     }
 
     public function testBackgroundColorPaintedBeforeRootLayerLoop(): void

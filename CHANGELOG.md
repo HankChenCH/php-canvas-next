@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 1.4.0 - 2026-10-18
+
+- 图片层适配模式 fit（ADR 0023，spec 见 `.scratch/image-layer-fit/spec.md`）：`ImageLayer` 新增静态适配声明 `fit`（`FIT_COVER`/`FIT_CONTAIN` 常量，`setFit()`/`getFit()`），v1 仅 contain 一档（完整显示：等比缩放至恰好完整落入内容盒、按对齐放置、空隙透明露下层）；cover 缺省不动
+- wire 条件写键：`spec.fit` 值=cover（缺省）整键不落、落键仅 fit≠cover 时发生且殿后 spec 末位（键序钉死 shape/align/position/fit）；解码宽容读——无键回填 cover、显式 cover 归一缺省态（name="" 先例）、未知值原样透传保往返恒等；无 fit 存量 graph 字节面零变化
+- contain 渲染语义：`AbstractRenderer::paintImage` 绘制分派点按物化后源图内在比例（`getimagesize`，绘制分派期 I/O 与 resolve 同批）把目标矩形收缩成等比矩形再调 `drawImage`——原语签名与 cover 语义一字不动（GD/Imagick 后端零改动白得）；收缩矩形纯计算在 `ImageLayer::getContainRect()`（等比收缩 + align/padding 镜像 `getImageOrigin` 同门放置），内在尺寸读取失败/未知 fit 值按 cover 降级，cover 路径逐字节零回归
+- fit 为静态声明：不进 hydrate 改写面与表达式白名单（TextLayer.text / ImageLayer.src / QrCodeLayer.value 白名单不变），hydrate 对 fit 仅透传
+
 ## 1.3.0 - 2026-10-18
 
 - 画布背景声明化（ADR 0022，spec 见 `.scratch/canvas-background/spec.md`）：canvas 级可选 `background` 字段（`CanvasBackground` 值对象，color + image 两分量可空，`Canvas::setBackground()` 声明）。wire 条件写键——两分量皆空整键不落、落键仅非空分量落键、键序钉死 `canvas{width,height,background}` / `background{color,image}`；无背景存量 graph 字节面零变化，落键/不落键两态 decode→encode 往返恒等，解码宽容读缺键回填空
