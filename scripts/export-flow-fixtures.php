@@ -5,11 +5,11 @@ declare(strict_types=1);
 /**
  * flow 段三端共享 fixture 导出（spec §10.5，工票 09 钉稿/工票 11 导出）。
  *
- * flow-semantics.json（contract: flow-semantics v1）
- * 内容流语义用例（20 规定用例集）：{name, description, frames, dataset, flowChain, expect}
+ * flow-semantics.json（contract: flow-semantics v1.1）
+ * 内容流语义用例（20 规定用例集 + 软诊断用例）：{name, description, frames, dataset, flowChain, expect}
  * 管线 = 模板态 frames graph → Canvas::fromGraph 重建 → DocumentCompiler::compile(frames, dataset, flowChain)
  *        → 帧序×页序 canvas graph 列表 | 单 errorCode
- * expect = {canvases: [canvas graph…]} | {errorCode}
+ * expect = {canvases: [canvas graph…], warnings?: [{code, path}]} | {errorCode}
  *
  * 输入不变式：frames 一律为模板态声明 graph（含 data.rowsPath + template）——与 paginate 段
  * 「输入为 hydrate 产物」不同，文档管线自声明态起跑，hydrate 在管线内（spec §10.3 时序）。
@@ -26,6 +26,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use HankChen\CanvasNext\Canvas;
+use HankChen\CanvasNext\Compiler\Diagnostic;
 use HankChen\CanvasNext\Compiler\DocumentCompiler;
 use HankChen\CanvasNext\Exception\CanvasNextExceptionInterface;
 use HankChen\CanvasNext\Layer\TableLayer;
@@ -74,6 +75,24 @@ function flowFixedRowTable(string $rowText = '固定行', int $height = 60, int 
 function flowHeader(string $expression = '共 {{itemsTotal}} 条'): TextLayer
 {
     return TextLayer::make(200, 30)->setExpression($expression)->setFont('', 12, '#000');
+}
+
+/** 软诊断用例模板表：单 auto 文本格、格内容整串求值（缺字段即整串空 → 兜底 + 软诊断） */
+function flowFallbackTable(string $rowsPath = 'order.items', int $y = 50): TableLayer
+{
+    $row = (new TableRowTemplate())->setHeight('auto');
+    $cell = (new TableCellLayer())->setWidth(320)->setHeight('auto');
+    $cell->addTemplateContentLayer(
+        TextLayer::make(320, 'auto')->setExpression('{{row.name}}')->setFont('', 20, '#000')
+    );
+    $row->addCell($cell);
+
+    $table = TableLayer::make(320, 400, '#fff');
+    $table->setPosition(0, $y);
+    $table->setRowsPath($rowsPath);
+    $table->setTemplate($row);
+
+    return $table;
 }
 
 /** name 行序列：['name' => '行1'] … */
@@ -322,12 +341,35 @@ function flowCases(): array
             [['frame' => 0, 'mode' => 'fixed']],
             ['errorCode' => 'content_overflow'],
         ],
+        // ------------------------------------------------ 软诊断（flow v1.1）
+        [ // 21
+            'text-fallback-warnings-full-hydrate',
+            '流路径软诊断面（工票 05）：hydrate 在管线内、warnings 反映分配前的全量 hydrate——'
+            . '每帧模板表吃全量 3 行实例，两帧各 3 条按帧序累积、path 不带帧标识；'
+            . '行分配（2+1）与诊断序列无关',
+            fn () => [
+                Canvas::make(320, 450, flowFallbackTable()),
+                Canvas::make(320, 450, flowFallbackTable()),
+            ],
+            flowDataset([['filler' => 0], ['filler' => 1], ['filler' => 2]]),
+            [['frame' => 0, 'mode' => 'fixed', 'quota' => 2], ['frame' => 1, 'mode' => 'paged']],
+            [
+                'canvases' => 2,
+                'rowsPerPage' => [['', ''], ['']],
+                'heights' => [450, 450],
+                'warnings' => array_map(
+                    static fn (int $row) => ['code' => 'expression_fallback_empty', 'path' => "layers[0].rows[{$row}].cells[0].content.data.value"],
+                    [0, 1, 2, 0, 1, 2]
+                ),
+            ],
+        ],
     ];
 }
 
 /**
  * 导出单个 flow 用例并自检：authored 结构期望与 PHP 实际行为不符直接失败。
- * expect.canvases 记录实际产物 graph（锁输出字节面，人审 diff 即双端语义行为 diff）
+ * expect.canvases 记录实际产物 graph（锁输出字节面，人审 diff 即双端语义行为 diff）；
+ * expect.warnings = 软诊断期望序列（工票 05，断言面只落 code + path、空序列键省略）
  */
 function exportFlowCase(array $case): array
 {
@@ -339,7 +381,8 @@ function exportFlowCase(array $case): array
 
     try {
         $decoded = array_map(static fn (array $graph) => Canvas::fromGraph($graph), $frameGraphs);
-        $canvases = (new DocumentCompiler())->compile($decoded, $dataset, $chain)->canvases;
+        $result = (new DocumentCompiler())->compile($decoded, $dataset, $chain);
+        $canvases = $result->canvases;
 
         if (isset($authored['errorCode'])) {
             throw new RuntimeException("用例 {$name}：预期报错 {$authored['errorCode']} 但编译成功");
@@ -366,7 +409,31 @@ function exportFlowCase(array $case): array
                 throw new RuntimeException("用例 {$name}：产物 {$pageIndex} 页高与预期 {$expectedHeight} 不符");
             }
         }
+        foreach ($authored['warnings'] ?? [] as $i => $expectedWarning) {
+            $actual = $result->warnings[$i] ?? null;
+            if (!$actual instanceof Diagnostic
+                || $actual->code !== $expectedWarning['code']
+                || ($actual->path ?? '') !== $expectedWarning['path']) {
+                throw new RuntimeException(
+                    "用例 {$name}：诊断[{$i}]「" . ($actual instanceof Diagnostic ? "{$actual->code} @ {$actual->path}" : '缺席')
+                    . '」与预期「' . $expectedWarning['code'] . ' @ ' . $expectedWarning['path'] . '」不符'
+                );
+            }
+        }
+        if (isset($authored['warnings']) && count($result->warnings) !== count($authored['warnings'])) {
+            throw new RuntimeException("用例 {$name}：诊断数 " . count($result->warnings) . ' 与预期 ' . count($authored['warnings']) . ' 不符');
+        }
         $expect = ['canvases' => array_map(static fn (Canvas $canvas) => $canvas->graph(), $canvases)];
+        $exportedWarnings = array_map(
+            static fn (Diagnostic $d) => array_filter(
+                ['code' => $d->code, 'path' => $d->path],
+                static fn ($v) => $v !== null
+            ),
+            $result->warnings
+        );
+        if ($exportedWarnings !== []) {
+            $expect['warnings'] = $exportedWarnings;
+        }
     } catch (CanvasNextExceptionInterface $e) {
         if (!isset($authored['errorCode']) || $authored['errorCode'] !== $e->getErrorCode()) {
             throw new RuntimeException("用例 {$name}：错误码 {$e->getErrorCode()} 与预期不符");
@@ -396,14 +463,18 @@ if (!is_dir($outDir) && !mkdir($outDir, 0755, true)) {
 
 $document = [
     'meta' => [
-        'contract' => 'flow-semantics v1',
+        'contract' => 'flow-semantics v1.1',
         'generator' => 'php-canvas-next/scripts/export-flow-fixtures.php',
         'notes' => [
-            '内容流（flow）语义用例 = spec §10.5 规定用例集 20 例（工票 09 钉稿语义/工票 11 导出），语义源 php-canvas-next tests/Compiler/DocumentCompilerFlowTest.php 逐用例平移；',
-            'runner 管线 = 模板态 frames graph → 反序列化重建 → DocumentCompiler::compile(frames, dataset, flowChain) → 帧序×页序 canvas graph 列表，与 PHP 导出管线同构（Go 镜像按同名用例对齐；Go paginate/document 实现可滞后，fixture 先钉——与 paginate testdata 现状同惯例）；',
+            '内容流（flow）语义用例 = spec §10.5 规定用例集 20 例（工票 09 钉稿语义/工票 11 导出）+ 软诊断用例 1 例（工票 05），语义源 php-canvas-next tests/Compiler/DocumentCompilerFlowTest.php 逐用例平移；',
+            'v1.1 = 软诊断发射缝语料面（工票 05，纯增用例）：expect 增可选 warnings 键 = 期望诊断序列 [{code, path}]'
+            . '（消息人读不入断言面，path 为产物树中立记法 spec/pipeline.md §5；省略 = 空序列），'
+            . '现役发射面唯一 = hydrate 文案类表达式兜底空串 expression_fallback_empty，'
+            . '流路径 warnings 反映分配前的全量 hydrate、按帧序累积、不带帧标识；',
+            'runner 管线 = 模板态 frames graph → 反序列化重建 → DocumentCompiler::compile(frames, dataset, flowChain) → 帧序×页序 canvas graph 列表，与 PHP 导出管线同构（Go 镜像按同名用例对齐）；',
             '输入不变式：frames 一律为模板态声明 graph（含 data.rowsPath + template），文档管线自声明态起跑、hydrate 在管线内（与 paginate 段「输入为 hydrate 产物」不同）；',
             'flowChain 节点 = {frame: int, mode: "fixed"|"paged", quota?: int≥0, omitIfEmpty?: bool}，封闭键面（未知键拒绝）；显式 [] 与 null 同义；',
-            'expect = {canvases: [canvas graph…]} | {errorCode}；document 段 code 全量 = flow_chain_invalid / flow_rows_path_inconsistent（spec §10.4）；分配期超容复用 paginate 段 content_overflow、任意帧 ≥2 顶层表复用 paginate_target_invalid——code 是三端一致性锚点；',
+            'expect = {canvases: [canvas graph…], warnings?} | {errorCode}；document 段 code 全量 = flow_chain_invalid / flow_rows_path_inconsistent（spec §10.4）；分配期超容复用 paginate 段 content_overflow、任意帧 ≥2 顶层表复用 paginate_target_invalid——code 是三端一致性锚点；',
             '再生成: go-canvas 仓 make flow-fixtures（需本机 PHP 8.3）',
         ],
     ],

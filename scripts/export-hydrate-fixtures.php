@@ -13,11 +13,11 @@ declare(strict_types=1);
  *   PHP 内置表权威导出，Go 端同构表断言锁漂移）；
  *   expect = 求值结果串 | {errorCode}（spec §5.2 稳定 code，三端一致性抓手）
  *
- * - expand-semantics.json（contract: expand-semantics v1）
+ * - expand-semantics.json（contract: expand-semantics v1.1）
  *   数据填充（hydrate）语义用例：{name, description, graph, dataset, expect}
- *   管线 = graph → Canvas::fromGraph → CanvasHydrator::hydrate → graph
+ *   管线 = graph → Canvas::fromGraph → CanvasHydrator::hydrate（接软诊断收集器）→ graph
  *   （解码期错误 template_rows_conflict / rows_path_missing 同管线可表达）；
- *   expect = {graph: 填充后 graph（含 V1 高度耦合重放结果）} | {errorCode}
+ *   expect = {graph: 填充后 graph（含 V1 高度耦合重放结果）, warnings?: [{code, path}]} | {errorCode}
  *
  * 用例语义源 = php-canvas-next 单测（tests/Expression + tests/Hydrate）逐用例平移；
  * 导出即自检：PHP 实际行为与 authored 期望不符直接失败，防 fixture 与实现漂移。
@@ -30,6 +30,8 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use HankChen\CanvasNext\Canvas;
+use HankChen\CanvasNext\Compiler\Diagnostic;
+use HankChen\CanvasNext\Compiler\DiagnosticCollector;
 use HankChen\CanvasNext\Exception\CanvasNextExceptionInterface;
 use HankChen\CanvasNext\Expression\DateFormat;
 use HankChen\CanvasNext\Hydrate\CanvasHydrator;
@@ -562,6 +564,20 @@ function hydrateCases(): array
     $v1Table->addRow(TableRowLayer::make(320, 'auto')->addCell($v1Cell));
     $v1Graph = Canvas::make(320, 400, $v1Table)->graph();
 
+    // 软诊断用例（expand v1.1）：V1 表命中/兜底混合（命中行静默、兜底行发射）
+    $v1FallbackTable = TableLayer::make(320, 100, '#fff');
+    $v1HitCell = (new TableCellLayer())->setWidth(320)->setHeight('auto');
+    $v1HitCell->addContentLayer(
+        TextLayer::make(320, 'auto')->setExpression('{{orderNo}}')->setFont('', 12, '#000')
+    );
+    $v1FallbackCell = (new TableCellLayer())->setWidth(320)->setHeight('auto');
+    $v1FallbackCell->addContentLayer(
+        TextLayer::make(320, 'auto')->setExpression('{{missing}}')->setFont('', 12, '#000')
+    );
+    $v1FallbackTable->addRow(TableRowLayer::make(320, 'auto')->addCell($v1HitCell));
+    $v1FallbackTable->addRow(TableRowLayer::make(320, 'auto')->addCell($v1FallbackCell));
+    $v1FallbackGraph = Canvas::make(320, 400, $v1FallbackTable)->graph();
+
     return [
         [$mainGraph, $mainDataset, null,
             'template-table-instantiation',
@@ -652,21 +668,62 @@ function hydrateCases(): array
         [$missingPathGraph, $mainDataset, 'rows_path_missing',
             'decode-rows-path-missing',
             '解码期：模板态缺 data.rowsPath = 非法 wire（先紧后松，补默认值是非破坏性变更）'],
+
+        // ---- 软诊断发射缝（expand v1.1，spec/pipeline.md §4/§5）：文案类求值空串 =
+        // 兜底空串 + 软诊断 expression_fallback_empty；断言面 = code + path + 序列序
+        [Canvas::make(
+            320,
+            100,
+            TextLayer::make(100, 30)->setExpression('{{orderNo}}')->setFont('', 12, '#000'),
+            TextLayer::make(100, 30)->setExpression('{{missing}}')->setFont('', 12, '#000')
+        )->graph(), ['orderNo' => 'A2026-001'], null,
+            'text-fallback-single-warning-path',
+            '软诊断发射缝：命中不发射、兜底才发射（混合双图层）；诊断 path = 产物树根相对'
+            . '点路径 layers[1].data.value，序列即发射序（图层文档序）'],
+        [Canvas::make(320, 400, singleTextTemplateTable('{{row.nickname}}', 'items'))->graph(),
+            ['items' => [['name' => '甲'], ['name' => '乙']]], null,
+            'text-fallback-template-row-sequence',
+            '模板表实例逐行发射：诊断 path = 产物树落位 rows[实例序].cells[0].content.data.value，'
+            . '序列即发射序（行序）'],
+        [$v1FallbackGraph, ['orderNo' => 'A2026-001'], null,
+            'text-fallback-v1-row-path',
+            'V1 表（静态 rows）命中/兜底混合：命中行静默，兜底行 path = '
+            . 'rows[1].cells[0].content.data.value'],
     ];
 }
 
-/** 导出单个填充用例：管线 = graph → fromGraph → hydrate，authored 错误码自检 */
+/** 软诊断期望序列（工票 05）：断言面只落 code + path（消息人读可本地化、不入断言面，spec §4/§5）；空序列 = 键省略 */
+function exportWarnings(DiagnosticCollector $warnings): ?array
+{
+    if ($warnings->all() === []) {
+        return null;
+    }
+
+    return array_map(
+        static fn (Diagnostic $d) => array_filter(
+            ['code' => $d->code, 'path' => $d->path],
+            static fn ($v) => $v !== null
+        ),
+        $warnings->all()
+    );
+}
+
+/** 导出单个填充用例：管线 = graph → fromGraph → hydrate（接软诊断收集器），authored 错误码自检 */
 function exportHydrateCase(array $case): array
 {
     [$graph, $dataset, $expectedErrorCode, $name, $description] = $case;
 
     try {
         $decoded = Canvas::fromGraph($graph);
-        $hydrated = (new CanvasHydrator())->hydrate($decoded, $dataset);
+        $warnings = new DiagnosticCollector();
+        $hydrated = (new CanvasHydrator())->hydrate($decoded, $dataset, $warnings);
         if ($expectedErrorCode !== null) {
             throw new RuntimeException("用例 {$name}：预期报错 {$expectedErrorCode} 但填充成功");
         }
         $expect = ['graph' => $hydrated->graph()];
+        if (($exported = exportWarnings($warnings)) !== null) {
+            $expect['warnings'] = $exported;
+        }
     } catch (CanvasNextExceptionInterface $e) {
         if ($expectedErrorCode !== null && $e->getErrorCode() !== $expectedErrorCode) {
             throw new RuntimeException("用例 {$name}：错误码 {$e->getErrorCode()} 与预期 {$expectedErrorCode} 不符");
@@ -716,12 +773,15 @@ $documents = [
     ],
     'expand-semantics.json' => [
         'meta' => [
-            'contract' => 'expand-semantics v1',
+            'contract' => 'expand-semantics v1.1',
             'generator' => 'php-canvas-next/scripts/export-hydrate-fixtures.php',
             'notes' => [
-                '数据填充（hydrate）语义用例，语义源 php-canvas-next tests/Hydrate/CanvasHydratorTest.php 逐用例平移（另含 QR/嵌套两个扩覆盖用例）；',
-                'runner 管线 = graph → 反序列化重建 → hydrate(dataset) → graph，与 PHP 导出管线同构（Go: canvas.FromGraph → hydrate）；',
-                '解码期错误（template_rows_conflict/rows_path_missing）与填充期错误同管线表达，expect = {graph} | {errorCode}（spec §5.2）；',
+                '数据填充（hydrate）语义用例，语义源 php-canvas-next tests/Hydrate/CanvasHydratorTest.php 逐用例平移（另含 QR/嵌套扩覆盖用例）；',
+                'v1.1 = 软诊断发射缝语料面（工票 05，纯增用例）：expect 增可选 warnings 键 = 期望诊断序列 [{code, path}]'
+                . '（消息人读不入断言面，path 为产物树中立记法 spec/pipeline.md §5；省略 = 空序列），'
+                . '现役发射面唯一 = 文案类表达式兜底空串 expression_fallback_empty，序列即发射序；',
+                'runner 管线 = graph → 反序列化重建 → hydrate(dataset, 收集器) → graph，与 PHP 导出管线同构（Go: canvas.FromGraph → hydrate）；',
+                '解码期错误（template_rows_conflict/rows_path_missing）与填充期错误同管线表达，expect = {graph, warnings?} | {errorCode}（spec §5.2）；',
                 'dataset null = 未绑数据集恒等直通（含模板表）；无标记无模板画布恒等直通；',
                 '填充产物 graph 已含 V1 高度耦合重放结果（行高定稿/固定格内容压平），填充永不回写源 graph；',
                 '资源表达式单值门（ADR 0020）：已标记 Image/Qr 的 expression 必须恰为一个 {{...}} 闭合片段 + 裸点路径'
