@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 1.3.0 - 2026-10-18
+
+- 画布背景声明化（ADR 0022，spec 见 `.scratch/canvas-background/spec.md`）：canvas 级可选 `background` 字段（`CanvasBackground` 值对象，color + image 两分量可空，`Canvas::setBackground()` 声明）。wire 条件写键——两分量皆空整键不落、落键仅非空分量落键、键序钉死 `canvas{width,height,background}` / `background{color,image}`；无背景存量 graph 字节面零变化，落键/不落键两态 decode→encode 往返恒等，解码宽容读缺键回填空
+- 渲染铺装（spec §4）：`AbstractRenderer::render()` 根层循环之前先铺色再铺图（复用 drawRect/drawImage 绘制原语，后端约零改动），背景图 cover 铺满画布矩形、透明区露背景色，背景之下无物（画布初始透明保留）；`renderLayer()` 单图层便捷入口不画背景（无画布矩形语义）
+- 背景图惰性物化：`ResourceResolver::resolveBackground()` 画布级入口，与 `resolveLayer` 同语义——物化前检查点、远程下载缓存（与图层共用 `img_layers` 缓存）、本地路径直通、失败即抛 `MaterializeException`、渲染面整体丢弃；不触发渲染器预遍历（`resolve()` 禁预遍历断言保持）
+- 分页与填充透传：`CanvasPaginator::split()` 页 canvas 键显式携带 background（spec §5 易漏点，每页均带）；hydrate/expand 对背景仅透传——不进 hydrate 改写面与表达式白名单（静态，ADR 0022 Q3），数据驱动底图继续走图层级，两形态并存合法
+
 ## 1.2.0 - 2026-10-15
 
 - 资源表达式单值裸路径门（ADR 0020）：已标记 Image/Qr 的 expression 求值前校验须恰为一个 `{{...}}` 闭合片段 + 裸点路径（`$index`/`$root.` 前缀合法），禁多片段拼接、片段外字面、内建函数与空片段；违例抛 `HydrateException` 新错误码 `expression_resource_single_ref`，先于求值与 `expression_empty_resource` 空串检查（测试钉序）。文本层插值语义与未标记字面直通零变化
