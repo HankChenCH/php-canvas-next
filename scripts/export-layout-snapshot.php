@@ -62,10 +62,11 @@ final class RecordingRenderer extends AbstractRenderer
         $this->records[] = ['op' => 'rect', 'x' => $x, 'y' => $y, 'w' => $width, 'h' => $height];
     }
 
-    protected function drawImage(string $src, int $x, int $y, int $width, int $height): void
+    protected function drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh): void
     {
-        // src 是机器本地缓存路径，不进快照；坐标与盒子（缩放铺放目标）才是布局事实
-        $this->records[] = ['op' => 'image', 'x' => $x, 'y' => $y, 'w' => $width, 'h' => $height];
+        // src 是机器本地缓存路径，不进快照；目标矩形（缩放铺放）才是布局事实。
+        // srcRect 属源图内在坐标（blit 化 ADR 0024），快照用例皆空引用图片层、不产生 image 记录
+        $this->records[] = ['op' => 'image', 'x' => $dx, 'y' => $dy, 'w' => $dw, 'h' => $dh];
     }
 
     protected function drawText(
@@ -273,9 +274,12 @@ function buildCases(): array
 
 /**
  * fit wire 契约用例（ADR 0023，go-canvas 工票 03）：同画布四层对照——
- * 缺省（cover，整键不落）、fit=contain（落键殿后 spec 末位）、未知枚举串 fill
+ * 缺省（cover，整键不落）、fit=contain（落键殿后 spec 末位）、落键值透传层
  * （宽容透传保往返恒等）、表达式标记 + fit（fit 与 data 正交，随打标存活）。
- * 空引用图片层零物化只画盒：快照锁定 wire 面，contain 收缩几何属渲染臂、
+ * 注（ADR 0024，fill/tile 转正）：第三层 fit='fill' 已是已知值，本层由
+ * 「未知枚举串透传」演示转为「落键值透传」演示——转正不改字节面，快照层与
+ * 导出描述一字不动（Go 侧生成器同款注释同步，fixture 字节零 diff）。
+ * 空引用图片层零物化只画盒：快照锁定 wire 面，各 fit 的分派几何属渲染臂、
  * 不进快照（内在尺寸读取属绘制分派期 I/O，双端各自单测锁定）
  */
 function buildImageFitWire(): Canvas

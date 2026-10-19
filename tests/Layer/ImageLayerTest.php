@@ -81,6 +81,18 @@ class ImageLayerTest extends CanvasTestCase
         $this->assertSame(['shape', 'align', 'position', 'fit'], array_keys($spec));
     }
 
+    public function testFitFillTileWrittenLastInSpec(): void
+    {
+        // fill/tile 转正（ADR 0024）同落键纪律：值是透传字符串，wire 字节面零扩展
+        $fill = ImageLayer::make(100, 100)->setImage('https://example.com/a.png')->setFit(ImageLayer::FIT_FILL);
+        $tile = ImageLayer::make(100, 100)->setImage('https://example.com/a.png')->setFit(ImageLayer::FIT_TILE);
+
+        $this->assertSame('fill', $fill->graph()['spec']['fit']);
+        $this->assertSame('tile', $tile->graph()['spec']['fit']);
+        $this->assertSame(['shape', 'align', 'position', 'fit'], array_keys($fill->graph()['spec']));
+        $this->assertSame(['shape', 'align', 'position', 'fit'], array_keys($tile->graph()['spec']));
+    }
+
     public function testFitRoundtripIdentity(): void
     {
         $layer = ImageLayer::make(30, 20)->setImage('https://example.com/a.png')->setFit(ImageLayer::FIT_CONTAIN);
@@ -89,6 +101,18 @@ class ImageLayerTest extends CanvasTestCase
 
         $this->assertSame('contain', $rebuilt->getFit());
         $this->assertSame($layer->graph(), $rebuilt->graph());
+    }
+
+    public function testFitFillTileRoundtripIdentity(): void
+    {
+        foreach ([ImageLayer::FIT_FILL, ImageLayer::FIT_TILE] as $fit) {
+            $layer = ImageLayer::make(30, 20)->setImage('https://example.com/a.png')->setFit($fit);
+
+            $rebuilt = ImageLayer::fromGraph($layer->graph());
+
+            $this->assertSame($fit, $rebuilt->getFit());
+            $this->assertSame($layer->graph(), $rebuilt->graph());
+        }
     }
 
     public function testExplicitCoverWireNormalizedToKeyless(): void
@@ -105,14 +129,15 @@ class ImageLayerTest extends CanvasTestCase
 
     public function testUnknownFitValuePassesThrough(): void
     {
-        // 未知值契约面原样透传（往返恒等）；渲染面按 cover 降级属渲染臂职责
+        // 未知值契约面原样透传（往返恒等）；渲染面按 cover 降级属渲染臂职责。
+        // fill/tile 已转正（ADR 0024），白名单外示例改用从未入册的值
         $graph = ImageLayer::make(10, 10)->setImage('x')->graph();
-        $graph['spec']['fit'] = 'fill';
+        $graph['spec']['fit'] = 'flip';
 
         $rebuilt = ImageLayer::fromGraph($graph);
 
-        $this->assertSame('fill', $rebuilt->getFit());
-        $this->assertSame('fill', $rebuilt->graph()['spec']['fit']);
+        $this->assertSame('flip', $rebuilt->getFit());
+        $this->assertSame('flip', $rebuilt->graph()['spec']['fit']);
     }
 
     public function testFitSurvivesSrcRewriteAndExpressionMarking(): void
@@ -154,5 +179,81 @@ class ImageLayerTest extends CanvasTestCase
         $this->assertSame([37, 12, 25, 25], $asym);
         $this->assertSame([0, 12, 25, 25], ImageLayer::make(100, 50)->setPadding(20, 10, 5, 0)->setHorizontalAlign('left')->getContainRect(100, 100));
         $this->assertSame([37, 20, 25, 25], ImageLayer::make(100, 50)->setPadding(20, 10, 5, 0)->setVerticalAlign('top')->getContainRect(100, 100));
+    }
+
+    /**
+     * cover 等比居中裁窗矩阵（ADR 0024）：源图坐标系里与内容盒同宽高比的窗口、
+     * 恒居中裁（对齐不进源窗），padding 经内容盒收缩间接收窄窗口；
+     * 与 getContainRect 同门（box/scale 公式互为 max/min 镜像）
+     */
+    public function testCoverRectMatrix(): void
+    {
+        // 竖图（1:4）进横盒（2:1）：源窗贴满宽、垂直居中裁
+        $this->assertSame([0, 175, 100, 50], ImageLayer::make(100, 50)->getCoverRect(100, 400));
+        // 方图进横盒：源窗全宽、中部横带（sy = (40-20)/2 = 10）
+        $this->assertSame([0, 10, 40, 20], ImageLayer::make(100, 50)->getCoverRect(40, 40));
+        // 横图（4:1）进竖盒：源窗贴满高、水平居中裁（sx = int(87.5)）
+        $this->assertSame([87, 0, 25, 50], ImageLayer::make(50, 100)->getCoverRect(200, 50));
+        // 等比：源窗 = 整图，零裁切
+        $this->assertSame([0, 0, 200, 100], ImageLayer::make(100, 50)->getCoverRect(200, 100));
+
+        // padding 收缩内容盒 → 窗口随之收窄（80×30 内容盒 → 40×15 窗）
+        $this->assertSame([0, 12, 40, 15], ImageLayer::make(100, 50)->setPadding(10)->getCoverRect(40, 40));
+        // 对齐不影响源窗（cover 恒居中裁）
+        $this->assertSame(
+            ImageLayer::make(100, 50)->getCoverRect(40, 40),
+            ImageLayer::make(100, 50)->setHorizontalAlign('left')->setVerticalAlign('top')->getCoverRect(40, 40)
+        );
+    }
+
+    /**
+     * tile 可见块矩形组矩阵（ADR 0024）：单元 = 内在尺寸 1:1，首块按对齐 + padding 锚定
+     * （与 getImageOrigin 同一 aligned 公式），网格向右下无限延伸、绘制面止于网格 ∩ 内容盒，
+     * 每块 [src, dst] 一一对应（src 为源图坐标可见子矩形、dst 为图层盒坐标）
+     */
+    public function testTileRectsMatrix(): void
+    {
+        // 小图 center：网格整体居中，右/下溢出半块截断（行主序）
+        $this->assertSame([
+            ['src' => [0, 0, 40, 40], 'dst' => [30, 5, 40, 40]],
+            ['src' => [0, 0, 30, 40], 'dst' => [70, 5, 30, 40]],
+            ['src' => [0, 0, 40, 5], 'dst' => [30, 45, 40, 5]],
+            ['src' => [0, 0, 30, 5], 'dst' => [70, 45, 30, 5]],
+        ], ImageLayer::make(100, 50)->getTileRects(40, 40));
+
+        // 大图 center：锚点为负露出图片中部（可见块只有网格首块的中部子矩形）
+        $this->assertSame(
+            [['src' => [10, 15, 100, 50], 'dst' => [0, 0, 100, 50]]],
+            ImageLayer::make(100, 50)->getTileRects(120, 80)
+        );
+
+        // align=right：首块贴右、锚点前空隙透明露下层，下方照常补行
+        $this->assertSame([
+            ['src' => [0, 0, 40, 40], 'dst' => [60, 0, 40, 40]],
+            ['src' => [0, 0, 40, 10], 'dst' => [60, 40, 40, 10]],
+        ], ImageLayer::make(100, 50)->setHorizontalAlign('right')->setVerticalAlign('top')->getTileRects(40, 40));
+
+        // 非均匀 padding：内容盒 (0,20)-(90,45)，网格止于交集（末列 10px 窄条）
+        $this->assertSame([
+            ['src' => [0, 0, 40, 25], 'dst' => [0, 20, 40, 25]],
+            ['src' => [0, 0, 40, 25], 'dst' => [40, 20, 40, 25]],
+            ['src' => [0, 0, 10, 25], 'dst' => [80, 20, 10, 25]],
+        ], ImageLayer::make(100, 50)->setPadding(20, 10, 5, 0)->setHorizontalAlign('left')->setVerticalAlign('top')->getTileRects(40, 40));
+
+        // 非对称 padding + center：锚点按整盒中点（与 contain 同门公式，可落在内容盒起点之前），
+        // 网格 ∩ 内容盒的可见块以 src 偏移修正（大图露中部：srcY = 45）
+        $this->assertSame(
+            [['src' => [0, 45, 90, 25], 'dst' => [0, 20, 90, 25]]],
+            ImageLayer::make(100, 50)->setPadding(20, 10, 5, 0)->getTileRects(100, 100)
+        );
+
+        // 网格线恰好压内容盒底边：零高交集不出块
+        $this->assertSame([
+            ['src' => [0, 0, 40, 40], 'dst' => [0, 0, 40, 40]],
+            ['src' => [0, 0, 40, 40], 'dst' => [40, 0, 40, 40]],
+        ], ImageLayer::make(80, 40)->setHorizontalAlign('left')->setVerticalAlign('top')->getTileRects(40, 40));
+
+        // 内容区被 padding 吃满：交集为空，零块
+        $this->assertSame([], ImageLayer::make(40, 40)->setPadding(20)->getTileRects(40, 40));
     }
 }

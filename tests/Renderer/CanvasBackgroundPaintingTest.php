@@ -25,11 +25,13 @@ class CanvasBackgroundPaintingTest extends CanvasTestCase
 
     protected function setUp(): void
     {
+        $this->tmpDir = sys_get_temp_dir() . '/canvas-next-bg-test-' . uniqid();
         $this->removeDir($this->cacheDir('img_layers'));
     }
 
     protected function tearDown(): void
     {
+        $this->cleanupTmpDir();
         $this->removeDir($this->cacheDir('img_layers'));
     }
 
@@ -74,14 +76,28 @@ class CanvasBackgroundPaintingTest extends CanvasTestCase
 
     public function testBackgroundImagePaintedAfterColorAtCanvasRect(): void
     {
-        // 先色后图：背景图 cover 铺满画布矩形（drawImage 原语自带 cover 语义），物化结果路径下放
+        // 先色后图：背景图铺满画布矩形，物化结果路径下放；
+        // 本地路径不存在 → 内在尺寸读取失败 → 统一退化 fill 形态（srcRect 零哨兵，ADR 0024）
         $renderer = $this->coordinateRenderer($this->resolverWith('should-not-be-used'));
         $canvas = Canvas::make(100, 80)->setBackground(new CanvasBackground('#ffffff', '/tmp/local-bg.png'));
 
         $renderer->render(new NullCancellation(), $canvas);
 
         $this->assertSame([[0, 0, 100, 80, '#ffffff']], $renderer->rects);
-        $this->assertSame([['/tmp/local-bg.png', 0, 0, 100, 80]], $renderer->images);
+        $this->assertSame([['/tmp/local-bg.png', 0, 0, 0, 0, 0, 0, 100, 80]], $renderer->images);
+    }
+
+    public function testBackgroundCoverWindowComputedAtDispatch(): void
+    {
+        // 背景恒 cover（ADR 0022）：分派点读内在尺寸、与图片臂共用同一 cover 窗公式
+        // （40×40 方图进 100×80 画布 → 全宽中部横带）
+        $png = $this->writePng($this->tmpDir, 'bg.png', 40, 40);
+        $renderer = $this->coordinateRenderer($this->resolverWith('should-not-be-used'));
+        $canvas = Canvas::make(100, 80)->setBackground(new CanvasBackground(null, $png));
+
+        $renderer->render(new NullCancellation(), $canvas);
+
+        $this->assertSame([[$png, 0, 4, 40, 32, 0, 0, 100, 80]], $renderer->images);
     }
 
     public function testNoBackgroundPaintsNothing(): void
@@ -112,7 +128,8 @@ class CanvasBackgroundPaintingTest extends CanvasTestCase
         $this->assertSame([$url], $downloader->calls);
         $this->assertSame([$ctx], $downloader->ctxs);
         $this->assertSame(1, $spy->backgroundCalls);
-        $this->assertSame([[$this->cacheDir('img_layers') . '/' . basename($url), 0, 0, 100, 80]], $renderer->images);
+        // 假字节非图 → 内在尺寸读取失败 → 退化 fill 形态（srcRect 零哨兵）
+        $this->assertSame([[$this->cacheDir('img_layers') . '/' . basename($url), 0, 0, 0, 0, 0, 0, 100, 80]], $renderer->images);
     }
 
     public function testBackgroundMaterializeFailureThrowsAndDropsProduct(): void

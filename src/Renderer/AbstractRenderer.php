@@ -57,8 +57,9 @@ abstract class AbstractRenderer implements RendererInterface
     /**
      * 画布背景铺装（ADR 0022 / spec §4）：插入点 = 根层循环之前，先色后图——
      * 背景之下无物（画布初始透明保留），背景图透明区露背景色。
-     * 背景图画布级惰性物化（绘制分派前、失败即抛、产物整体丢弃），cover 铺满画布矩形
-     * （drawImage 原语自带 cover 语义）；无背景零开销。
+     * 背景图画布级惰性物化（绘制分派前、失败即抛、产物整体丢弃）；铺装恒 cover（ADR 0022）：
+     * 分派点读内在尺寸（与 resolve 同批 I/O）算等比居中裁窗（与图片臂共用同一公式，ADR 0024）
+     * 后 blit 进画布矩形，读取失败统一退化 fill 形态（真损坏图在后端解码抛，结局 parity）。
      * renderLayer() 单图层便捷入口不画背景（无画布矩形语义）
      */
     private function paintBackground(Cancellation $ctx, Canvas $canvas): void
@@ -77,7 +78,11 @@ abstract class AbstractRenderer implements RendererInterface
         $image = $background->getImage();
         if ($image !== null) {
             $src = $this->resolver->resolveBackground($ctx, $image);
-            $this->drawImage($src, 0, 0, $canvas->getWidth(), $canvas->getHeight());
+            $size = $this->intrinsicSize($src);
+            [$sx, $sy, $sw, $sh] = $size !== null
+                ? ImageLayer::coverSourceWindow($canvas->getWidth(), $canvas->getHeight(), $size[0], $size[1])
+                : [0, 0, 0, 0];
+            $this->drawImage($src, $sx, $sy, $sw, $sh, 0, 0, $canvas->getWidth(), $canvas->getHeight());
         }
     }
 
@@ -155,6 +160,15 @@ abstract class AbstractRenderer implements RendererInterface
         }
     }
 
+    /**
+     * 图片臂全 fit 分派（ADR 0024 / spec §4）：原语是双矩形 blit、零 fit 语义，
+     * 四档 fit 的几何全部在此算定（白名单分派，未知值落 cover 臂）——
+     * cover 等比居中裁窗 / fill 整图（与 cover 同门 dstRect，唯一差别在 srcRect）/
+     * contain 收缩（ADR 0023 语义不动）/ tile 可见块逐块 blit。
+     * 内在尺寸读取为全 fit 前置：绘制分派点一次（getimagesize 属绘制分派期 I/O，
+     * 与 resolve 同批，@ 抑制损坏图告警），读取失败统一退化 fill 形态——
+     * 真损坏图在后端解码处照旧抛，渲染结局与迁移前 parity
+     */
     private function paintImage(Cancellation $ctx, ImageLayer $layer, int $x, int $y): void
     {
         // 绘制分派前按需物化（spec §4.3）：失败即抛，渲染面丢弃
@@ -163,24 +177,69 @@ abstract class AbstractRenderer implements RendererInterface
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
         $src = $layer->getResolvedSrc();
-        if ($src !== null) {
-            if ($layer->getFit() === ImageLayer::FIT_CONTAIN) {
-                // contain（ADR 0023）：按物化后源图内在比例收缩目标矩形再调原语
-                // （getimagesize 属绘制分派期 I/O，与 resolve 同批，@ 抑制损坏图告警——
-                // 读取失败按 cover 走，损坏图不因 fit 崩渲染）；未知 fit 值不在白名单，自然落 cover 分支
-                $size = @getimagesize($src);
-                if (is_array($size) && $size[0] > 0 && $size[1] > 0) {
-                    [$cx, $cy, $cw, $ch] = $layer->getContainRect($size[0], $size[1]);
-                    $this->drawImage($src, $x + $cx, $y + $cy, $cw, $ch);
+        if ($src === null) {
+            return;
+        }
 
-                    return;
-                }
+        // cover/fill 共用目标矩形（同门）：getImageOrigin + 内容宽高
+        [$originX, $originY] = $layer->getImageOrigin();
+        $dstX = $x + $originX;
+        $dstY = $y + $originY;
+        $dstWidth = $layer->getContentWidth();
+        $dstHeight = $layer->getContentHeight();
+
+        $size = $this->intrinsicSize($src);
+        if ($size === null) {
+            // 内在尺寸不可用：整图拉伸进目标矩形（fill 形态），srcRect 零哨兵由后端按解码实际尺寸取整图
+            $this->drawImage($src, 0, 0, 0, 0, $dstX, $dstY, $dstWidth, $dstHeight);
+
+            return;
+        }
+        [$imgWidth, $imgHeight] = $size;
+
+        $fit = $layer->getFit();
+        if ($fit === ImageLayer::FIT_CONTAIN) {
+            // contain（ADR 0023）：按内在比例收缩目标矩形再整图 blit
+            [$cx, $cy, $cw, $ch] = $layer->getContainRect($imgWidth, $imgHeight);
+            $this->drawImage($src, 0, 0, $imgWidth, $imgHeight, $x + $cx, $y + $cy, $cw, $ch);
+
+            return;
+        }
+
+        if ($fit === ImageLayer::FIT_TILE) {
+            // tile：可见块逐块 blit（src/dst 可见子矩形 1:1），裁切纯几何完成、原语零裁剪参数
+            foreach ($layer->getTileRects($imgWidth, $imgHeight) as $block) {
+                [$sx, $sy, $sw, $sh] = $block['src'];
+                [$dx, $dy, $dw, $dh] = $block['dst'];
+                $this->drawImage($src, $sx, $sy, $sw, $sh, $x + $dx, $y + $dy, $dw, $dh);
             }
 
-            // cover 路径（缺省/未知值降级/尺寸读取失败共用）：原语自带 cover 语义，零回归
-            [$originX, $originY] = $layer->getImageOrigin();
-            $this->drawImage($src, $x + $originX, $y + $originY, $layer->getContentWidth(), $layer->getContentHeight());
+            return;
         }
+
+        if ($fit === ImageLayer::FIT_FILL) {
+            // fill：整图进与 cover 相同的目标矩形（非等比拉伸，不裁切不留空隙）
+            $this->drawImage($src, 0, 0, $imgWidth, $imgHeight, $dstX, $dstY, $dstWidth, $dstHeight);
+
+            return;
+        }
+
+        // cover（缺省/显式 cover 归一/未知值白名单外降级）：等比居中裁窗
+        [$sx, $sy, $sw, $sh] = $layer->getCoverRect($imgWidth, $imgHeight);
+        $this->drawImage($src, $sx, $sy, $sw, $sh, $dstX, $dstY, $dstWidth, $dstHeight);
+    }
+
+    /**
+     * 源图内在尺寸（全 fit 前置，ADR 0024）：绘制分派点一次读取，
+     * 不可用（损坏/非图文件/零维）返回 null——调用方统一退化 fill 形态
+     *
+     * @return array{0: int, 1: int}|null [width, height]
+     */
+    private function intrinsicSize(string $src): ?array
+    {
+        $size = @getimagesize($src);
+
+        return is_array($size) && $size[0] > 0 && $size[1] > 0 ? [$size[0], $size[1]] : null;
     }
 
     private function paintText(Cancellation $ctx, TextLayer $layer, int $x, int $y): void
@@ -220,10 +279,11 @@ abstract class AbstractRenderer implements RendererInterface
         if ($src !== null) {
             // 二维码内切于内容盒：边长 = min(内容区宽高)（quiet zone 语义——padding 留白
             // 即码外静区，露图层盒背景），对齐 + padding 定位（镜像 paintImage 语义）；
-            // 边长 ≤0 由 drawImage 防护只画盒
+            // QR 产物恒正方形（ADR 0015）、目标恒正方形——cover 窗 = 整图，srcRect 零哨兵
+            // 整图 blit、零内在尺寸读取（ADR 0024）；边长 ≤0 由 blit 后端防护只画盒
             [$originX, $originY] = $layer->getQrOrigin();
             $side = $layer->getContentSide();
-            $this->drawImage($src, $x + $originX, $y + $originY, $side, $side);
+            $this->drawImage($src, 0, 0, 0, 0, $x + $originX, $y + $originY, $side, $side);
         }
     }
 
@@ -240,8 +300,15 @@ abstract class AbstractRenderer implements RendererInterface
      */
     abstract protected function drawRect(int $x, int $y, int $width, int $height, ?string $bgColor, array $border): void;
 
-    /** 绘制图片：缩放裁切至 width×height 后放置于 (x, y) */
-    abstract protected function drawImage(string $src, int $x, int $y, int $width, int $height): void;
+    /**
+     * 绘制图片（双矩形 blit，ADR 0024）：把源图中 (sx, sy) 起的 sw×sh 矩形
+     * （源图内在尺寸坐标系）拉伸搬运至目标 (dx, dy) 处的 dw×dh 矩形。
+     * 原语零 fit 语义、零内在尺寸读取——cover 裁窗 / contain 收缩 / fill 整图 /
+     * tile 网格全部是分派层纯几何（PHP 权威端 paintImage，三端同构）。
+     * sw 或 sh ≤ 0 为整图哨兵：按解码后实际尺寸取整图（分派层内在尺寸不可用的
+     * 退化形态，接口 major 契约的组成部分）；dw/dh ≤0 后端防护不画
+     */
+    abstract protected function drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh): void;
 
     /** 绘制单行文本，(x, y) 为 align 语义下的锚点 */
     abstract protected function drawText(

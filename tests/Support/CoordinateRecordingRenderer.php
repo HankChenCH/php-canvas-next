@@ -11,7 +11,7 @@ class CoordinateRecordingRenderer extends RecordingTestRenderer
     /** @var list<array{0: int, 1: int, 2: int, 3: int, 4: ?string}> */
     public array $rects = [];
 
-    /** @var list<array{0: string, 1: int, 2: int, 3: int, 4: int}> */
+    /** @var list<array{0: string, 1: int, 2: int, 3: int, 4: int, 5: int, 6: int, 7: int, 8: int}> [src, sx, sy, sw, sh, dx, dy, dw, dh] */
     public array $images = [];
 
     protected function drawRect(int $x, int $y, int $width, int $height, ?string $bgColor, array $border): void
@@ -20,9 +20,18 @@ class CoordinateRecordingRenderer extends RecordingTestRenderer
         parent::drawRect($x, $y, $width, $height, $bgColor, $border);
     }
 
-    protected function drawImage(string $src, int $x, int $y, int $width, int $height): void
-    {
-        $this->images[] = [$src, $x, $y, $width, $height];
-        parent::drawImage($src, $x, $y, $width, $height);
+    protected function drawImage(
+        string $src,
+        int $sx,
+        int $sy,
+        int $sw,
+        int $sh,
+        int $dx,
+        int $dy,
+        int $dw,
+        int $dh
+    ): void {
+        $this->images[] = [$src, $sx, $sy, $sw, $sh, $dx, $dy, $dw, $dh];
+        parent::drawImage($src, $sx, $sy, $sw, $sh, $dx, $dy, $dw, $dh);
     }
 }

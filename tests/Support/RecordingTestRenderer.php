@@ -44,8 +44,17 @@ class RecordingTestRenderer extends AbstractRenderer
         }
     }
 
-    protected function drawImage(string $src, int $x, int $y, int $width, int $height): void
-    {
+    protected function drawImage(
+        string $src,
+        int $sx,
+        int $sy,
+        int $sw,
+        int $sh,
+        int $dx,
+        int $dy,
+        int $dw,
+        int $dh
+    ): void {
         $this->records[] = 'image';
     }
 
