@@ -1,4 +1,4 @@
-# tests/Corpus/ — 四契约语料 runner（工票 06 消费翻转）
+# tests/Corpus/ — 五契约语料 runner（工票 06 消费翻转；扫描面随工票 08 收编）
 
 语义权威 = 语料仓 submodule `canvas-semantics/`（pin 见 `git submodule status`，GOVERNANCE §4：
 已发布版本目录冻结）。**语义变更从此语料先行**：改语料 → 移 pin → 更新 runner 的
@@ -9,6 +9,7 @@
 | Runner | 语料模块文件 | 契约版本 | 用例数 | 管线 |
 | --- | --- | --- | --- | --- |
 | `ExpressionEvalCorpusTest` | `expression-eval/v2.0/{shell,path,fn-date,fn-number}.json` | `expression-eval v2.0` | 104 | `InterpolationEvaluator::evaluate` |
+| `ExpressionScanCorpusTest` | `expression-scan/v1.0/scan.json` | `expression-scan v1.0` | 27 | `InterpolationEvaluator` 扫描面 + 「切分拼装 ≡ 整串求值」互证 |
 | `ExpandCorpusTest` | `expand-semantics/v1.1/expand.json` | `expand-semantics v1.1` | 29 | `fromGraph → CanvasHydrator::hydrate` |
 | `PaginateCorpusTest` | `paginate-semantics/v1.0/paginate.json` | `paginate-semantics v1.0` | 12 | `fromGraph → CanvasPaginator::fromOptions → paginate` |
 | `FlowCorpusTest` | `flow-semantics/v1.1/flow.json` | `flow-semantics v1.1` | 23 | `fromGraph(frames) → DocumentCompiler::compile` |
@@ -23,7 +24,10 @@
    软诊断 warnings 断言 code + path + 序列序，消息人读不入断言面（`spec/pipeline.md` §4/§5）。
 
 求值 runner 另钉 `fn-date.json` 的 `dateTokens` 转译表（语料为权威，`DateFormat::tokenTable()`
-向语料对齐）与跨模块文件用例名唯一性。
+向语料对齐）与跨模块文件用例名唯一性。扫描 runner（工票 08 自退役的 `scripts/scan-fixtures.php`
+承接）另钉实现仓自检契约：**「切分拼装逐段求值 ≡ 整串求值」互证**（含未闭合尾按字面拼回、
+错误片段整串必抛同码错误）——扫描切分与权威求值器漂移即红；语料形状（键集/逐 kind part 键集/
+code 白名单）由语料仓 canvasctl validate 严格分派，不在本仓重复。
 
 ## PHP-only 关怀用例清点（保留在实现仓的理由）
 
@@ -57,12 +61,13 @@
   携带表达式原文与定位路径。
 
 **D. 组合/骨架**（编译器模板方法、文档编排、渲染/资源/文本/运行时等单元测试不在本票范围，
-语料只钉四契约语义，组合语义与单元 API 属实现仓所有）。
+语料只钉五契约语义，组合语义与单元 API 属实现仓所有）。
 
 ## 消费红线
 
 - 语料 submodule 未检出（fresh clone 后先 `git submodule update --init`）runner 即红，
   不设任何降级路径；
-- 不从 go-canvas 载体（`go-canvas/**/testdata/*.json`）读语义——那是导出给 Go 的镜像
-  （工票 07 切 submodule 后随工票 08 退役）；
+- 不从任何导出载体/镜像副本读语义——go-canvas 载体镜像与 PHP 导出脚本
+  （`scripts/export-*-fixtures.php`、`scripts/scan-fixtures.php`）已随工票 07/08 退役，
+  语料仓是唯一语义源头（`scripts/export-layout-snapshot.php` 除外，布局快照属 wire 字节面）；
 - 语料用例不得在本仓复刻手抄——新增语义先入语料（提案通道）再随 pin 移动进本仓。

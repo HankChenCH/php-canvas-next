@@ -1,0 +1,49 @@
+{
+    "declaration": "canvas-semantics/support-surface v1",
+    "implementation": {
+        "repo": "hankchen/php-canvas-next",
+        "language": "php",
+        "profile": "renderer",
+        "note": "渲染端（graph 契约权威端），五契约全模块支持：求值/填充/分页/流装箱 + 编辑器扫描面（求值器扫描循环与 TS 扫描器钉同一份切分语义）"
+    },
+    "contracts": [
+        {
+            "id": "expression-eval",
+            "version": "v2.0",
+            "moduleFiles": [
+                { "id": "shell", "support": "supported", "note": "" },
+                { "id": "path", "support": "supported", "note": "" },
+                { "id": "fn-date", "support": "supported", "note": "" },
+                { "id": "fn-number", "support": "supported", "note": "" }
+            ]
+        },
+        {
+            "id": "expression-scan",
+            "version": "v1.0",
+            "moduleFiles": [
+                { "id": "scan", "support": "supported", "note": "" }
+            ]
+        },
+        {
+            "id": "expand-semantics",
+            "version": "v1.1",
+            "moduleFiles": [
+                { "id": "expand", "support": "supported", "note": "含 expect.warnings 软诊断面（工票 05 发射缝）" }
+            ]
+        },
+        {
+            "id": "paginate-semantics",
+            "version": "v1.0",
+            "moduleFiles": [
+                { "id": "paginate", "support": "supported", "note": "" }
+            ]
+        },
+        {
+            "id": "flow-semantics",
+            "version": "v1.1",
+            "moduleFiles": [
+                { "id": "flow", "support": "supported", "note": "含 expect.warnings 软诊断面（工票 05 全帧汇入）" }
+            ]
+        }
+    ]
+}
