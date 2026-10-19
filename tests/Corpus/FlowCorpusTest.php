@@ -19,7 +19,7 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
  */
 class FlowCorpusTest extends CanvasTestCase
 {
-    private const CONTRACT = 'flow-semantics v1.1';
+    public const CONTRACT = 'flow-semantics v1.1';
     private const MODULE_FILE = 'flow-semantics/v1.1/flow.json';
 
     public static function flowCasesProvider(): iterable

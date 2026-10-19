@@ -17,7 +17,7 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
  */
 class ExpressionEvalCorpusTest extends CanvasTestCase
 {
-    private const CONTRACT = 'expression-eval v3.0';
+    public const CONTRACT = 'expression-eval v3.0';
 
     /** 模块文件 = 求值契约语义域拆分（corpus/README.md）：外壳/路径/日期/数字函数族 */
     private const MODULES = ['shell', 'path', 'fn-date', 'fn-number'];

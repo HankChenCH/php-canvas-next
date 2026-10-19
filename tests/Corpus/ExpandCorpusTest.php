@@ -19,7 +19,7 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
  */
 class ExpandCorpusTest extends CanvasTestCase
 {
-    private const CONTRACT = 'expand-semantics v1.1';
+    public const CONTRACT = 'expand-semantics v1.1';
     private const MODULE_FILE = 'expand-semantics/v1.1/expand.json';
 
     public static function expandCasesProvider(): iterable

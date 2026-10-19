@@ -18,7 +18,7 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
  */
 class PaginateCorpusTest extends CanvasTestCase
 {
-    private const CONTRACT = 'paginate-semantics v1.0';
+    public const CONTRACT = 'paginate-semantics v1.0';
     private const MODULE_FILE = 'paginate-semantics/v1.0/paginate.json';
 
     public static function paginateCasesProvider(): iterable

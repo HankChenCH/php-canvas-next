@@ -17,7 +17,7 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
  */
 class ExpressionScanCorpusTest extends CanvasTestCase
 {
-    private const CONTRACT = 'expression-scan v1.0';
+    public const CONTRACT = 'expression-scan v1.0';
 
     private InterpolationEvaluator $evaluator;
 
