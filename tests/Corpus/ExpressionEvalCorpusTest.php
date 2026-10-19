@@ -9,7 +9,7 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
 
 /**
  * 求值契约 runner（工票 06 消费翻转）：语义 = submodule 语料
- * corpus/expression-eval/v2.0/{shell,path,fn-date,fn-number}.json，共 104 用例。
+ * corpus/expression-eval/v3.0/{shell,path,fn-date,fn-number}.json，共 107 用例。
  *
  * 管线 = InterpolationEvaluator::evaluate(template, context)，expect = 输出串 | {errorCode}
  * （code 是三端锚点，锁 code 字符串与五阶段异常载体；消息人读不入断言面）。
@@ -17,7 +17,7 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
  */
 class ExpressionEvalCorpusTest extends CanvasTestCase
 {
-    private const CONTRACT = 'expression-eval v2.0';
+    private const CONTRACT = 'expression-eval v3.0';
 
     /** 模块文件 = 求值契约语义域拆分（corpus/README.md）：外壳/路径/日期/数字函数族 */
     private const MODULES = ['shell', 'path', 'fn-date', 'fn-number'];
@@ -32,7 +32,7 @@ class ExpressionEvalCorpusTest extends CanvasTestCase
     public static function evalCasesProvider(): iterable
     {
         foreach (self::MODULES as $module) {
-            $document = CorpusDocument::load("expression-eval/v2.0/{$module}.json", self::CONTRACT);
+            $document = CorpusDocument::load("expression-eval/v3.0/{$module}.json", self::CONTRACT);
             foreach ($document['cases'] as $case) {
                 yield "{$module}:{$case['name']}" => [$case];
             }
@@ -77,7 +77,7 @@ class ExpressionEvalCorpusTest extends CanvasTestCase
     {
         // 逐模块加载即版本双写互检（CorpusDocument::load 内断言 meta.contract 精确相等）
         foreach (self::MODULES as $module) {
-            $document = CorpusDocument::load("expression-eval/v2.0/{$module}.json", self::CONTRACT);
+            $document = CorpusDocument::load("expression-eval/v3.0/{$module}.json", self::CONTRACT);
             $this->assertNotEmpty($document['cases'], "模块 {$module} 用例集不可为空");
         }
     }
@@ -87,7 +87,7 @@ class ExpressionEvalCorpusTest extends CanvasTestCase
         // 用例名唯一的作用域 = 契约版本、跨模块文件（corpus/README.md）
         $names = [];
         foreach (self::MODULES as $module) {
-            $document = CorpusDocument::load("expression-eval/v2.0/{$module}.json", self::CONTRACT);
+            $document = CorpusDocument::load("expression-eval/v3.0/{$module}.json", self::CONTRACT);
             array_push($names, ...array_column($document['cases'], 'name'));
         }
 
@@ -99,7 +99,7 @@ class ExpressionEvalCorpusTest extends CanvasTestCase
     {
         // dateTokens 转译表：语料为权威，PHP DateFormat 内置表向语料对齐
         // （token/语义注记逐行一致 + 样例时刻逐 token 输出一致）
-        $document = CorpusDocument::load('expression-eval/v2.0/fn-date.json', self::CONTRACT);
+        $document = CorpusDocument::load('expression-eval/v3.0/fn-date.json', self::CONTRACT);
         $dateTokens = $document['dateTokens'] ?? $this->fail('fn-date.json 缺 dateTokens 转译表');
 
         $table = DateFormat::tokenTable();

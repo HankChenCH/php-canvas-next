@@ -40,6 +40,7 @@ final class DateFormat
         ['s', '秒 0-59'],
         ['dddd', '周几中文全称：星期日…星期六'],
         ['ddd', '周几中文简称：周日…周六'],
+        ['Q', '季度 1-4（ceil(月/3)）'],
     ];
 
     private const WEEK_FULL = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
@@ -172,6 +173,7 @@ final class DateFormat
             's' => (string) $dt['s'],
             'dddd' => self::WEEK_FULL[self::weekday($dt['y'], $dt['m'], $dt['d'])],
             'ddd' => self::WEEK_SHORT[self::weekday($dt['y'], $dt['m'], $dt['d'])],
+            'Q' => (string) (intdiv($dt['m'] - 1, 3) + 1),
         };
     }
 

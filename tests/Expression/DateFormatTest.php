@@ -23,7 +23,7 @@ class DateFormatTest extends CanvasTestCase
 
     public function testTokenTableIsAuthoritativeSource(): void
     {
-        // 14 个 token，顺序与语义串逐字对应 spec §3.1 表
+        // 15 个 token（v3.0 增季度 Q，提案 0002），顺序与语义串逐字对应 spec §3.1 表
         $expects = [
             'YYYY' => '2026', 'YY' => '26',
             'MM' => '10', 'M' => '10',
@@ -32,10 +32,11 @@ class DateFormatTest extends CanvasTestCase
             'mm' => '30', 'm' => '30',
             'ss' => '05', 's' => '5',
             'dddd' => '星期日', 'ddd' => '周日',
+            'Q' => '4',
         ];
 
         $table = DateFormat::tokenTable();
-        $this->assertCount(14, $table);
+        $this->assertCount(15, $table);
         $this->assertSame(array_keys($expects), array_column($table, 'token'));
 
         foreach ($table as $row) {
@@ -55,7 +56,7 @@ class DateFormatTest extends CanvasTestCase
         // mm 分 ≠ MM 月；小写 yyyy 无 y token → fail-fast
         $this->assertSame('10月30分', DateFormat::format('MM月mm分', $this->dt));
         $this->assertSyntaxError('yyyy');
-        $this->assertSyntaxError('YYYYQ');
+        $this->assertSyntaxError('YYYYW'); // Q 已随 v3.0 收编（提案 0002），换仍处白名单外的 W
     }
 
     public function testNonLetterAndNonAsciiPassThrough(): void

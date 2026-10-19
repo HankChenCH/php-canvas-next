@@ -8,7 +8,7 @@
 
 | Runner | 语料模块文件 | 契约版本 | 用例数 | 管线 |
 | --- | --- | --- | --- | --- |
-| `ExpressionEvalCorpusTest` | `expression-eval/v2.0/{shell,path,fn-date,fn-number}.json` | `expression-eval v2.0` | 104 | `InterpolationEvaluator::evaluate` |
+| `ExpressionEvalCorpusTest` | `expression-eval/v3.0/{shell,path,fn-date,fn-number}.json` | `expression-eval v3.0` | 107 | `InterpolationEvaluator::evaluate` |
 | `ExpressionScanCorpusTest` | `expression-scan/v1.0/scan.json` | `expression-scan v1.0` | 27 | `InterpolationEvaluator` 扫描面 + 「切分拼装 ≡ 整串求值」互证 |
 | `ExpandCorpusTest` | `expand-semantics/v1.1/expand.json` | `expand-semantics v1.1` | 29 | `fromGraph → CanvasHydrator::hydrate` |
 | `PaginateCorpusTest` | `paginate-semantics/v1.0/paginate.json` | `paginate-semantics v1.0` | 12 | `fromGraph → CanvasPaginator::fromOptions → paginate` |
