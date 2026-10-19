@@ -2,6 +2,11 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.0.2 - 2026-10-19
+
+- `ImageLayer::getTileRects` 非法内在尺寸（≤0）防线返回空集：≤0 步长使平铺循环不终止，公开 API 对第三方直调自防御（Go TileRects 同款防御；分派层 intrinsicSize 已门控，渲染行为面零变化）+ 防线用例（retro 08 票）
+- 测试基建：CanvasTestCase `cleanupTmpDir` 收敛复用 `removeDir` 递归删除（评审 Standards 项去重）
+
 ## 2.0.1 - 2026-10-19
 
 - 图片分派内在尺寸 EXIF 感知（07 票，ADR 0024 追记）：orientation 5..8 的 JPEG 分派层返回**观察方向尺寸**（宽高互换）——blit 窗口几何与位图后端解码归正位图（intervention v4 `autoOrientation` 双驱动默认）同坐标系，修复旋转 JPEG 在 cover/tile 档的错窗越界黑补与 contain 档的宽高比倒置（v1 潜伏缺陷同根）；exif 扩展缺席宽容退回原始尺寸（与损坏图同一退化臂）。Go 端为原始尺寸系自洽（裁窗先于归正）、JS 端 naturalWidth 即观察方向——三端渲染输出 parity 不变，坐标系约定落 `drawImage` 契约 docblock

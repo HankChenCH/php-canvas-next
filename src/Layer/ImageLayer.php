@@ -193,12 +193,17 @@ class ImageLayer extends AbstractLayer
      * 绘制面 = 网格 ∩ 内容盒：末行末列半块截断、锚点未覆盖处空隙透明露下层。
      * 每块 src/dst 一一对应（可见子矩形 1:1 映射，src 为源图坐标、dst 为图层盒坐标）；
      * 可见块数不设上限（静默截断是语义意外）。纯布局计算；
-     * 内在尺寸由调用方读取，非法尺寸（≤0）不进本函数
+     * 内在尺寸由调用方读取（分派层已门控），非法尺寸（≤0）防线返回空集——
+     * ≤0 步长会使循环不终止，公开 API 须对第三方直调自防御（Go TileRects 同款）
      *
      * @return list<array{src: array{0: int, 1: int, 2: int, 3: int}, dst: array{0: int, 1: int, 2: int, 3: int}}>（行主序）
      */
     public function getTileRects(int $imgWidth, int $imgHeight): array
     {
+        if ($imgWidth <= 0 || $imgHeight <= 0) {
+            return [];
+        }
+
         $anchorX = intval($this->alignedX($imgWidth));
         $anchorY = intval($this->alignedY($imgHeight));
         $left = intval($this->padding['left']);

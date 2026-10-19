@@ -255,5 +255,11 @@ class ImageLayerTest extends CanvasTestCase
 
         // 内容区被 padding 吃满：交集为空，零块
         $this->assertSame([], ImageLayer::make(40, 40)->setPadding(20)->getTileRects(40, 40));
+
+        // 非法内在尺寸防线：≤0 步长会使循环不终止，返回空集（分派层已门控，
+        // 此处兜公开 API 第三方直调——Go TileRects 同款防御）
+        $this->assertSame([], ImageLayer::make(100, 50)->getTileRects(0, 40));
+        $this->assertSame([], ImageLayer::make(100, 50)->getTileRects(40, 0));
+        $this->assertSame([], ImageLayer::make(100, 50)->getTileRects(-40, 40));
     }
 }

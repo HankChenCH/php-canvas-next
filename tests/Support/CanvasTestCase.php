@@ -30,19 +30,10 @@ abstract class CanvasTestCase extends TestCase
         mkdir($this->tmpDir);
     }
 
-    /** 清理临时目录（幂等：未创建过直接跳过） */
+    /** 清理临时目录（幂等：未创建过直接跳过；复用 removeDir 递归删除） */
     protected function cleanupTmpDir(): void
     {
-        if (!is_dir($this->tmpDir)) {
-            return;
-        }
-
-        foreach (scandir($this->tmpDir) ?: [] as $entry) {
-            if ($entry !== '.' && $entry !== '..') {
-                @unlink($this->tmpDir . '/' . $entry);
-            }
-        }
-        @rmdir($this->tmpDir);
+        $this->removeDir($this->tmpDir);
     }
 
     /**
