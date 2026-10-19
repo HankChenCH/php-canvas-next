@@ -2,6 +2,17 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.0.0 - 2026-10-19
+
+**Breaking（ADR 0024）**：`AbstractRenderer::drawImage` 绘制原语签名变更为双矩形 blit——`drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh)`（扁平十参，drawText 同款风格），把源图 (sx, sy) 起 sw×sh 矩形拉伸搬运至目标 (dx, dy) 处 dw×dh；原语零 fit 语义、零内在尺寸读取，sw/sh ≤ 0 为整图哨兵（按解码后实际尺寸取整图）。**自定义渲染后端必须同步迁移**（官方伴随包 php-canvas-image-renderer 以 v2.0.0 跟进）。
+
+- 图片绘制原语通用化 + 全 fit 分派上移（ADR 0024，spec 见 `.scratch/image-fit-fill-tile/spec.md`）：四档 fit 的几何全部收进绘制分派层——cover（缺省/未知值降级）等比居中裁窗、fill 整图（与 cover 同门 dstRect，唯一差别在 srcRect）、contain 收缩（ADR 0023 语义逐字节不动）、tile 可见块逐块 blit；背景臂（恒 cover，ADR 0022）迁移为分派点算 cover 窗后 blit，QR 臂（恒内切正方形，ADR 0015）srcRect 零哨兵整图 blit、零尺寸读取——语义零变化
+- 图片层适配模式扩四档：`ImageLayer` 新增 `FIT_FILL`（拉伸铺满：非等比缩放至恰好铺满内容盒，不裁切不留空隙）与 `FIT_TILE`（平铺：按内在尺寸 1:1 原尺寸重复铺放，首块按对齐 + padding 锚定、向右下无限重复、绘制面止于网格 ∩ 内容盒，末行末列半块截断、锚点前空隙透明，零参数）；tile 矩形组纯布局函数 `getTileRects(imgW, imgH)`（行主序 [src, dst] 组，可见块数不设上限）
+- cover 裁窗公式收敛单处：`ImageLayer::getCoverRect(imgW, imgH)`（源图坐标窗口）与 `getContainRect` 同门，公式唯一实例 = 静态 `coverSourceWindow(boxW, boxH, imgW, imgH)`（图片臂与画布背景臂共用，防数学漂移）；坐标取整统一 PHP `intval`（朝零截断）——Go/JS 移植须复制朝零截断语义保三端像素 parity
+- 内在尺寸读取扩为全 fit 前置：`paintImage` 绘制分派点一次读取（`getimagesize`，与 resolve 同批 I/O），读取失败统一退化**整图拉伸进目标矩形（fill 形态）**，srcRect 零哨兵——真损坏图在后端解码处照旧抛，渲染结局与迁移前逐位对齐
+- wire 零变化（spec §3/§4）：`spec.fit` 形态/键序/条件写键一字不动，已知值域 {cover, contain} 扩为 {cover, contain, fill, tile}（值是透传字符串）；无键回填 cover、显式 cover 归一缺省、未知值原样透传保往返恒等、渲染面白名单外降级 cover，全部不变；布局快照字节面零 diff（导出脚本仅同步生成器注释与 RecordingRenderer 签名）
+- 测试：cover 裁窗矩阵 + tile 矩形组矩阵 + fill/cover 同门 dst 断言（纯几何单测）；四档 fit 分派坐标断言（CoordinateRecordingRenderer，blit 调用序列 srcRect/dstRect/次数）；内在尺寸失败退化矩阵；背景/QR 臂迁移既有断言零 diff
+
 ## 1.4.0 - 2026-10-18
 
 - 图片层适配模式 fit（ADR 0023，spec 见 `.scratch/image-layer-fit/spec.md`）：`ImageLayer` 新增静态适配声明 `fit`（`FIT_COVER`/`FIT_CONTAIN` 常量，`setFit()`/`getFit()`），v1 仅 contain 一档（完整显示：等比缩放至恰好完整落入内容盒、按对齐放置、空隙透明露下层）；cover 缺省不动
