@@ -54,7 +54,7 @@ class ExpandCorpusTest extends CanvasTestCase
         );
         $this->assertSame(
             $case['expect']['warnings'] ?? [],
-            CorpusDocument::exportedWarnings($warnings->all()),
+            CorpusDocument::collectedWarnings($warnings->all()),
             "用例 {$case['name']}：软诊断序列与语料期望不符"
         );
     }

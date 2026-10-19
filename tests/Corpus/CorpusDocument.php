@@ -10,7 +10,7 @@ use HankChen\CanvasNext\Exception\PaginateException;
 use RuntimeException;
 
 /**
- * 语料仓文档加载器（工票 06 消费翻转）：四契约 runner 的共享取数面。
+ * 语料仓文档加载器（工票 06 消费翻转）：五契约 runner 的共享取数面。
  *
  * 语义权威 = submodule canvas-semantics/corpus/（本仓 pin 消费，语料先行）；
  * 加载即双写互检——meta.contract 与 runner 钉定的期望版本串精确相等，
@@ -22,7 +22,7 @@ final class CorpusDocument
     public const SUBMODULE_DIR = 'canvas-semantics';
 
     /**
-     * 错误 code → 五阶段异常载体（四契约语料可达面，与 spec/error-codes.json 对齐）。
+     * 错误 code → 五阶段异常载体（五契约语料可达面，与 spec/error-codes.json 对齐）。
      * code 是三端锚点；载体是本端 API 面。绘制期 5 code 与 frames_empty（入口守卫）
      * 语料不可达，不登记。
      */
@@ -95,12 +95,13 @@ final class CorpusDocument
     }
 
     /**
-     * 诊断序列 → 语料断言面（code + path，null path 键省略），与导出脚本同构。
+     * 诊断序列 → 语料断言面（code + path，null path 键省略）。
+     * 命名取「收集器收集到的 warnings」：避开「导出」词条（CONTEXT.md 中导出另有所指）。
      *
      * @param list<Diagnostic> $warnings
      * @return list<array{code: string, path?: string}>
      */
-    public static function exportedWarnings(array $warnings): array
+    public static function collectedWarnings(array $warnings): array
     {
         return array_map(
             static fn (Diagnostic $d) => array_filter(

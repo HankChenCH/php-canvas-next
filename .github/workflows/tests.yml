@@ -32,7 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # tests/Corpus 硬依赖语料仓 submodule（四契约语义权威）
+          # tests/Corpus 硬依赖语料仓 submodule（五契约语义权威）
           submodules: true
 
       - name: Setup PHP

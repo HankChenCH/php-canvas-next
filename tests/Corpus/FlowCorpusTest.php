@@ -58,7 +58,7 @@ class FlowCorpusTest extends CanvasTestCase
         );
         $this->assertSame(
             $case['expect']['warnings'] ?? [],
-            CorpusDocument::exportedWarnings($result->warnings),
+            CorpusDocument::collectedWarnings($result->warnings),
             "用例 {$case['name']}：软诊断序列与语料期望不符"
         );
     }
