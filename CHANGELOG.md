@@ -2,9 +2,15 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.0.1 - 2026-10-19
+
+- 图片分派内在尺寸 EXIF 感知（07 票，ADR 0024 追记）：orientation 5..8 的 JPEG 分派层返回**观察方向尺寸**（宽高互换）——blit 窗口几何与位图后端解码归正位图（intervention v4 `autoOrientation` 双驱动默认）同坐标系，修复旋转 JPEG 在 cover/tile 档的错窗越界黑补与 contain 档的宽高比倒置（v1 潜伏缺陷同根）；exif 扩展缺席宽容退回原始尺寸（与损坏图同一退化臂）。Go 端为原始尺寸系自洽（裁窗先于归正）、JS 端 naturalWidth 即观察方向——三端渲染输出 parity 不变，坐标系约定落 `drawImage` 契约 docblock
+- paintImage 退化臂注释收窄：「渲染结局与迁移前 parity」限定为后端解码同样失败的真损坏图；「解码可过而尺寸探测不识」的窄缝源（如部分 SVG）静默呈现 fill 形态，明示为 ADR 0024 接受面
+- 历史勘误：2.0.0 条目「扁平十参」实为九参（$src + 8 个 int）
+
 ## 2.0.0 - 2026-10-19
 
-**Breaking（ADR 0024）**：`AbstractRenderer::drawImage` 绘制原语签名变更为双矩形 blit——`drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh)`（扁平十参，drawText 同款风格），把源图 (sx, sy) 起 sw×sh 矩形拉伸搬运至目标 (dx, dy) 处 dw×dh；原语零 fit 语义、零内在尺寸读取，sw/sh ≤ 0 为整图哨兵（按解码后实际尺寸取整图）。**自定义渲染后端必须同步迁移**（官方伴随包 php-canvas-image-renderer 以 v2.0.0 跟进）。
+**Breaking（ADR 0024）**：`AbstractRenderer::drawImage` 绘制原语签名变更为双矩形 blit——`drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh)`（扁平九参，drawText 同款风格），把源图 (sx, sy) 起 sw×sh 矩形拉伸搬运至目标 (dx, dy) 处 dw×dh；原语零 fit 语义、零内在尺寸读取，sw/sh ≤ 0 为整图哨兵（按解码后实际尺寸取整图）。**自定义渲染后端必须同步迁移**（官方伴随包 php-canvas-image-renderer 以 v2.0.0 跟进）。
 
 - 图片绘制原语通用化 + 全 fit 分派上移（ADR 0024，spec 见 `.scratch/image-fit-fill-tile/spec.md`）：四档 fit 的几何全部收进绘制分派层——cover（缺省/未知值降级）等比居中裁窗、fill 整图（与 cover 同门 dstRect，唯一差别在 srcRect）、contain 收缩（ADR 0023 语义逐字节不动）、tile 可见块逐块 blit；背景臂（恒 cover，ADR 0022）迁移为分派点算 cover 窗后 blit，QR 臂（恒内切正方形，ADR 0015）srcRect 零哨兵整图 blit、零尺寸读取——语义零变化
 - 图片层适配模式扩四档：`ImageLayer` 新增 `FIT_FILL`（拉伸铺满：非等比缩放至恰好铺满内容盒，不裁切不留空隙）与 `FIT_TILE`（平铺：按内在尺寸 1:1 原尺寸重复铺放，首块按对齐 + padding 锚定、向右下无限重复、绘制面止于网格 ∩ 内容盒，末行末列半块截断、锚点前空隙透明，零参数）；tile 矩形组纯布局函数 `getTileRects(imgW, imgH)`（行主序 [src, dst] 组，可见块数不设上限）

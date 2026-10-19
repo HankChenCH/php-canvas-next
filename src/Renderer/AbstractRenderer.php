@@ -167,7 +167,9 @@ abstract class AbstractRenderer implements RendererInterface
      * contain 收缩（ADR 0023 语义不动）/ tile 可见块逐块 blit。
      * 内在尺寸读取为全 fit 前置：绘制分派点一次（getimagesize 属绘制分派期 I/O，
      * 与 resolve 同批，@ 抑制损坏图告警），读取失败统一退化 fill 形态——
-     * 真损坏图在后端解码处照旧抛，渲染结局与迁移前 parity
+     * 真损坏图在后端解码处照旧抛（结局不变）；「解码可过而尺寸探测不识」的
+     * 窄缝源（如部分 SVG）静默呈现 fill 形态，为 ADR 0024 明示接受面。
+     * EXIF 方向图返回观察方向尺寸（07 票裁决），分派几何与解码归正位图同系
      */
     private function paintImage(Cancellation $ctx, ImageLayer $layer, int $x, int $y): void
     {
@@ -190,7 +192,7 @@ abstract class AbstractRenderer implements RendererInterface
 
         $size = $this->intrinsicSize($src);
         if ($size === null) {
-            // 内在尺寸不可用：整图拉伸进目标矩形（fill 形态），srcRect 零哨兵由后端按解码实际尺寸取整图
+            // 内在尺寸不可用：整图拉伸进目标矩形（fill 形态），srcRect 零哨兵由后端取归正位图整幅
             $this->drawImage($src, 0, 0, 0, 0, $dstX, $dstY, $dstWidth, $dstHeight);
 
             return;
@@ -231,15 +233,30 @@ abstract class AbstractRenderer implements RendererInterface
 
     /**
      * 源图内在尺寸（全 fit 前置，ADR 0024）：绘制分派点一次读取，
-     * 不可用（损坏/非图文件/零维）返回 null——调用方统一退化 fill 形态
+     * 不可用（损坏/非图文件/零维）返回 null——调用方统一退化 fill 形态。
+     * EXIF 方向图返回观察方向尺寸（orientation 5..8 宽高互换，07 票裁决）：
+     * 位图后端解码即归正（intervention v4 autoOrientation 双驱动默认），
+     * 分派几何须与归正位图同系；getimagesize 返回的是原始存储尺寸。
+     * exif 扩展缺席时宽容退回原始尺寸（与损坏图同一退化臂）
      *
      * @return array{0: int, 1: int}|null [width, height]
      */
     private function intrinsicSize(string $src): ?array
     {
         $size = @getimagesize($src);
+        if (!is_array($size) || $size[0] <= 0 || $size[1] <= 0) {
+            return null;
+        }
 
-        return is_array($size) && $size[0] > 0 && $size[1] > 0 ? [$size[0], $size[1]] : null;
+        if (($size[2] ?? null) === IMAGETYPE_JPEG && function_exists('exif_read_data')) {
+            $exif = @exif_read_data($src);
+            $orientation = is_array($exif) ? (int) ($exif['Orientation'] ?? 1) : 1;
+            if ($orientation >= 5 && $orientation <= 8) {
+                [$size[0], $size[1]] = [$size[1], $size[0]];
+            }
+        }
+
+        return [$size[0], $size[1]];
     }
 
     private function paintText(Cancellation $ctx, TextLayer $layer, int $x, int $y): void
@@ -302,10 +319,11 @@ abstract class AbstractRenderer implements RendererInterface
 
     /**
      * 绘制图片（双矩形 blit，ADR 0024）：把源图中 (sx, sy) 起的 sw×sh 矩形
-     * （源图内在尺寸坐标系）拉伸搬运至目标 (dx, dy) 处的 dw×dh 矩形。
+     * （与分派层 intrinsicSize 同坐标系——EXIF 方向图为观察方向，07 票裁决）
+     * 拉伸搬运至目标 (dx, dy) 处的 dw×dh 矩形。
      * 原语零 fit 语义、零内在尺寸读取——cover 裁窗 / contain 收缩 / fill 整图 /
      * tile 网格全部是分派层纯几何（PHP 权威端 paintImage，三端同构）。
-     * sw 或 sh ≤ 0 为整图哨兵：按解码后实际尺寸取整图（分派层内在尺寸不可用的
+     * sw 或 sh ≤ 0 为整图哨兵：取解码归正位图整幅（分派层内在尺寸不可用的
      * 退化形态，接口 major 契约的组成部分）；dw/dh ≤0 后端防护不画
      */
     abstract protected function drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh): void;

@@ -55,6 +55,51 @@ class ImageFitPaintingTest extends CanvasTestCase
         $this->assertSame(['begin', 'rect', 'image', 'end'], $renderer->records);
     }
 
+    public function testExifRotatedImageDispatchesWindowsInObservedDimensions(): void
+    {
+        // EXIF orientation 6（顺时针 90°）：8x16 存储尺寸观察为 16x8——分派层内在
+        // 尺寸返回观察方向尺寸（07 票裁决），cover 窗与位图后端解码归正位图同系
+        // （intervention v4 autoOrientation 双驱动解码即归正）：scale = 1 整图 blit。
+        // 修前按原始存储尺寸算窗 (0,6,8,4)，在后端归正坐标系越界错窗黑补，
+        // 且 contain 宽高比随之倒置（v1 潜伏缺陷同根）
+        $src = $this->twoBandExifJpeg(6);
+        $renderer = $this->renderer();
+        $layer = ImageLayer::make(16, 8)->setImage($src);
+
+        $renderer->renderLayer(new NullCancellation(), $layer);
+
+        $this->assertSame([[$src, 0, 0, 16, 8, 0, 0, 16, 8]], $renderer->images);
+    }
+
+    /**
+     * 8x16 上红下蓝、携带指定 EXIF orientation 的 JPEG 落盘（GD 编码后在 SOI 后
+     * 注入最小 APP1 Exif 段：II 字节序 TIFF，IFD0 仅 Orientation 一项 SHORT；
+     * 与 go-canvas image-renderer / php-canvas-image-renderer 同名助手同构）
+     */
+    private function twoBandExifJpeg(int $orientation): string
+    {
+        $image = imagecreatetruecolor(8, 16);
+        $red = imagecolorallocate($image, 255, 0, 0);
+        $blue = imagecolorallocate($image, 0, 0, 255);
+        imagefilledrectangle($image, 0, 0, 7, 7, $red);
+        imagefilledrectangle($image, 0, 8, 7, 15, $blue);
+        $path = $this->tmpDir . '/exif-rotated.jpg';
+        imagejpeg($image, $path, 100);
+        imagedestroy($image);
+
+        $ifd = pack('v', 1)
+            . pack('v', 0x0112) . pack('v', 3) . pack('V', 1)
+            . pack('v', $orientation) . pack('v', 0)
+            . pack('V', 0);
+        $payload = "Exif\x00\x00" . 'II' . pack('v', 42) . pack('V', 8) . $ifd;
+        $app1 = "\xFF\xE1" . pack('n', strlen($payload) + 2) . $payload;
+
+        $bytes = file_get_contents($path);
+        file_put_contents($path, substr($bytes, 0, 2) . $app1 . substr($bytes, 2));
+
+        return $path;
+    }
+
     public function testExplicitCoverWireAlsoCovers(): void
     {
         // wire 显式 cover（第三方手写 graph）：解码归一缺省，渲染走 cover 裁窗
