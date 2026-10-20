@@ -155,6 +155,159 @@ class ImageLayerTest extends CanvasTestCase
         $this->assertSame('contain', $layer->getFit());
     }
 
+    // ------------------------------------------------------------------
+    // 裁剪形状 clip（ADR 0026）：wire 条件写键——缺省（矩形）整键不落、
+    // 殿后 spec 末位 fit 之后（键序 shape/align/position/fit/clip）、
+    // 显式 rect 归一缺省（cover 归一先例）、未知值宽容透传保往返恒等
+    // ------------------------------------------------------------------
+
+    public function testClipOmittedByDefault(): void
+    {
+        // 缺省 = 矩形不裁：整键不落，getClip() 回 null（缺省态字节面与无字段版本一致）
+        $layer = ImageLayer::make(100, 100)->setImage('https://example.com/a.png');
+
+        $this->assertNull($layer->getClip());
+        $this->assertArrayNotHasKey('clip', $layer->graph()['spec']);
+    }
+
+    public function testClipCircleWrittenLastInSpecAfterFit(): void
+    {
+        // 条件写键 + 键序钉死：clip 殿后于 shape/align/position/fit（ADR 0026）
+        $layer = ImageLayer::make(100, 100)
+            ->setImage('https://example.com/a.png')
+            ->setFit(ImageLayer::FIT_CONTAIN)
+            ->setClip(ImageLayer::CLIP_CIRCLE);
+
+        $spec = $layer->graph()['spec'];
+
+        $this->assertSame('circle', $spec['clip']);
+        $this->assertSame(['shape', 'align', 'position', 'fit', 'clip'], array_keys($spec));
+    }
+
+    public function testClipCircleWithoutFitStillWrittenLast(): void
+    {
+        // 未声明 fit 时 clip 同样殿后 spec 末位
+        $layer = ImageLayer::make(100, 100)->setImage('https://example.com/a.png')->setClip(ImageLayer::CLIP_CIRCLE);
+
+        $this->assertSame(['shape', 'align', 'position', 'clip'], array_keys($layer->graph()['spec']));
+    }
+
+    public function testExplicitRectWireNormalizedToKeyless(): void
+    {
+        // 解码宽容：第三方写入显式 rect 与缺省同归一（fit 显式 cover 归一先例），再序列化整键不落
+        $graph = ImageLayer::make(10, 10)->setImage('x')->graph();
+        $graph['spec']['clip'] = ImageLayer::CLIP_RECT;
+
+        $rebuilt = ImageLayer::fromGraph($graph);
+
+        $this->assertNull($rebuilt->getClip());
+        $this->assertArrayNotHasKey('clip', $rebuilt->graph()['spec']);
+        $this->assertNull(ImageLayer::make(10, 10)->setClip(ImageLayer::CLIP_RECT)->getClip());
+    }
+
+    public function testUnknownClipValuePassesThrough(): void
+    {
+        // 未知值契约面原样透传（往返恒等）；渲染面按矩形降级属渲染臂职责。
+        // 'star' 是从未入册的任意未知串
+        $graph = ImageLayer::make(10, 10)->setImage('x')->graph();
+        $graph['spec']['clip'] = 'star';
+
+        $rebuilt = ImageLayer::fromGraph($graph);
+
+        $this->assertSame('star', $rebuilt->getClip());
+        $this->assertSame('star', $rebuilt->graph()['spec']['clip']);
+    }
+
+    public function testClipRoundtripIdentity(): void
+    {
+        $layer = ImageLayer::make(30, 20)->setImage('https://example.com/a.png')->setClip(ImageLayer::CLIP_CIRCLE);
+
+        $rebuilt = ImageLayer::fromGraph($layer->graph());
+
+        $this->assertSame('circle', $rebuilt->getClip());
+        $this->assertSame($layer->graph(), $rebuilt->graph());
+    }
+
+    public function testNonStringClipValueSilentlyDefaults(): void
+    {
+        // 非字符串静默归缺省（fit 同门读入门风）：isset + is_string 双门，不告警
+        $graph = ImageLayer::make(10, 10)->setImage('x')->graph();
+        $graph['spec']['clip'] = 42;
+
+        $rebuilt = ImageLayer::fromGraph($graph);
+
+        $this->assertNull($rebuilt->getClip());
+        $this->assertArrayNotHasKey('clip', $rebuilt->graph()['spec']);
+    }
+
+    public function testClipSurvivesSrcRewriteAndExpressionMarking(): void
+    {
+        // clip 与 src/fit 正交：改图、打标均不扰动裁剪声明
+        $layer = ImageLayer::make(10, 10)
+            ->setClip(ImageLayer::CLIP_CIRCLE)
+            ->setImage('https://example.com/a.png')
+            ->setExpression('{{row.photo}}');
+
+        $this->assertSame('circle', $layer->getClip());
+        $this->assertSame('circle', ImageLayer::fromGraph($layer->graph())->getClip());
+
+        $layer->setImage('https://example.com/b.png');
+        $this->assertSame('circle', $layer->getClip());
+    }
+
+    // ------------------------------------------------------------------
+    // 内切圆纯函数矩阵（ADR 0026）：直径 = min(内容区宽高)、盒内对齐定位
+    // （alignedX/alignedY 同门公式）、非方盒恒正圆留透明边不变形为椭圆
+    // ------------------------------------------------------------------
+
+    public function testInscribedCircleRectMatrix(): void
+    {
+        // 方盒：内切圆 = 整个内容盒
+        $this->assertSame([0, 0, 100, 100], ImageLayer::make(100, 100)->getInscribedCircleRect());
+
+        // 非方盒（横盒 2:1）：直径取短边 50、垂直居中，左右留透明边
+        $this->assertSame([25, 0, 50, 50], ImageLayer::make(100, 50)->getInscribedCircleRect());
+
+        // 对齐分量：left/top 贴内容盒原点侧，right/bottom 贴对侧（恒正圆 side=50）
+        $this->assertSame([0, 0, 50, 50], ImageLayer::make(100, 50)->setHorizontalAlign('left')->setVerticalAlign('top')->getInscribedCircleRect());
+        $this->assertSame([50, 0, 50, 50], ImageLayer::make(100, 50)->setHorizontalAlign('right')->setVerticalAlign('bottom')->getInscribedCircleRect());
+
+        // padding 收缩内容盒：直径 = min(内容宽高)（内边距即框外留白）
+        $this->assertSame([10, 10, 80, 80], ImageLayer::make(100, 100)->setPadding(10)->getInscribedCircleRect());
+
+        // 非对称 padding：center 按整盒中点、left/top 取各自 padding 分量（contain 矩阵同款期望）
+        $asym = ImageLayer::make(100, 50)->setPadding(20, 10, 5, 0)->getInscribedCircleRect(); // 内容盒 90×25 → 边长 25
+        $this->assertSame([37, 12, 25, 25], $asym);
+        $this->assertSame([0, 12, 25, 25], ImageLayer::make(100, 50)->setPadding(20, 10, 5, 0)->setHorizontalAlign('left')->getInscribedCircleRect());
+        $this->assertSame([37, 20, 25, 25], ImageLayer::make(100, 50)->setPadding(20, 10, 5, 0)->setVerticalAlign('top')->getInscribedCircleRect());
+    }
+
+    // ------------------------------------------------------------------
+    // 圆周描边参数解析（ADR 0026 / CONTEXT.md 词条）：宽取四边已声明宽的
+    // 最小值、颜色按 top→right→bottom→left 取首个非空边色、四边全未声明不描边
+    // ------------------------------------------------------------------
+
+    public function testCircleStrokeParsingMatrix(): void
+    {
+        // 四边全未声明：不描边
+        $this->assertNull(ImageLayer::make(100, 100)->getCircleStroke());
+
+        // 单边声明：宽与色都取该边
+        $this->assertSame(['width' => 4, 'color' => '#f00'], ImageLayer::make(100, 100)->setBorderTop(4, '#f00')->getCircleStroke());
+        $this->assertSame(['width' => 3, 'color' => '#0f0'], ImageLayer::make(100, 100)->setBorderRight(3, '#0f0')->getCircleStroke());
+
+        // 多边声明：宽取最小值（top 2 < bottom 8），色按 top→right→bottom→left 取首个非空（top）
+        $layer = ImageLayer::make(100, 100)->setBorderTop(2, '#f00')->setBorderBottom(8, '#00f');
+        $this->assertSame(['width' => 2, 'color' => '#f00'], $layer->getCircleStroke());
+
+        // 首个非空按序回退：top 未声明、right 5 蓝色、left 2 黄色 → 宽 2、色取 right 蓝
+        $layer = ImageLayer::make(100, 100)->setBorderRight(5, '#00f')->setBorderLeft(2, '#ff0');
+        $this->assertSame(['width' => 2, 'color' => '#00f'], $layer->getCircleStroke());
+
+        // setBorder 全边同值：宽色一致
+        $this->assertSame(['width' => 4, 'color' => '#abc'], ImageLayer::make(100, 100)->setBorder(4, '#abc')->getCircleStroke());
+    }
+
     /**
      * contain 收缩矩形纯计算矩阵（ADR 0023）：等比收缩长边贴内容盒 + align/padding 放置，
      * 公式镜像 getImageOrigin 同门（center 取整盒中点、right/bottom 贴整盒对边）

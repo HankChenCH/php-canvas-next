@@ -4,6 +4,7 @@ namespace HankChen\CanvasNext\Renderer;
 
 use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Contracts\RendererInterface;
+use HankChen\CanvasNext\Contracts\ShapeCapableRenderer;
 use HankChen\CanvasNext\Layer\AbstractLayer;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\QrCodeLayer;
@@ -165,6 +166,10 @@ abstract class AbstractRenderer implements RendererInterface
      * 四档 fit 的几何全部在此算定（白名单分派，未知值落 cover 臂）——
      * cover 等比居中裁窗 / fill 整图（与 cover 同门 dstRect，唯一差别在 srcRect）/
      * contain 收缩（ADR 0023 语义不动）/ tile 可见块逐块 blit。
+     * clip 声明（ADR 0026）改写绘制形态：circle 档且后端实现形状能力口走圆形三步
+     * （背景填进内切圆、内容按 fit 绘出后遮罩 blit、边框沿圆周描环），矩形盒
+     * rect/drawImage 路径不参与；未知 clip 值与后端缺能力口降级矩形
+     * （fit 未知值纪律同门）。
      * 内在尺寸读取为全 fit 前置：绘制分派点一次（getimagesize 属绘制分派期 I/O，
      * 与 resolve 同批，@ 抑制损坏图告警），读取失败统一退化 fill 形态——
      * 真损坏图在后端解码处照旧抛（结局不变）；「解码可过而尺寸探测不识」的
@@ -176,6 +181,13 @@ abstract class AbstractRenderer implements RendererInterface
         // 绘制分派前按需物化（spec §4.3）：失败即抛，渲染面丢弃
         $this->resolver->resolveLayer($ctx, $layer);
 
+        // 圆形档（ADR 0026）：clip 白名单 + 后端能力口探测双门，否则矩形路径照旧
+        if ($layer->getClip() === ImageLayer::CLIP_CIRCLE && $this instanceof ShapeCapableRenderer) {
+            $this->paintImageCircle($layer, $x, $y);
+
+            return;
+        }
+
         $this->drawRect($x, $y, $layer->getWidth(), $layer->getHeight(), $layer->getBackground(), $layer->getBorder());
 
         $src = $layer->getResolvedSrc();
@@ -183,6 +195,71 @@ abstract class AbstractRenderer implements RendererInterface
             return;
         }
 
+        // 矩形路径：fit 分派层算定几何、drawImage 原语直绘
+        $this->paintFitBlits($layer, $src, $x, $y, fn (
+            string $src,
+            int $sx,
+            int $sy,
+            int $sw,
+            int $sh,
+            int $dx,
+            int $dy,
+            int $dw,
+            int $dh
+        ) => $this->drawImage($src, $sx, $sy, $sw, $sh, $dx, $dy, $dw, $dh));
+    }
+
+    /**
+     * 圆形档三步（ADR 0026，完整圆形框——整层渲染面裁进内切圆）：
+     * ① 背景色填充进内切圆（矩形盒 drawRect 不画——背景/边框都不落矩形盒）；
+     * ② 内容按 fit 绘出后遮罩 blit 进圆（fit 几何照旧，只换成掩码形态原语，
+     * 掩码矩形 = 内切圆矩形，内在尺寸不可用退化 fill 形态再裁圆）；
+     * ③ 边框沿圆周描成环（描边参数解析规则见 ImageLayer::getCircleStroke）。
+     * 内切圆边长 ≤0（内容区被 padding 吃满）零几何零绘制。
+     * 本方法私有且仅由 paintImage 的能力口探测（instanceof）命中臂调用——
+     * drawEllipse/drawImageMasked 只在实现了 ShapeCapableRenderer 的后端上存在
+     */
+    private function paintImageCircle(ImageLayer $layer, int $x, int $y): void
+    {
+        [$cx, $cy, $side] = $layer->getInscribedCircleRect();
+        if ($side <= 0) {
+            return;
+        }
+
+        $circleX = $x + $cx;
+        $circleY = $y + $cy;
+        $this->drawEllipse($circleX, $circleY, $side, $side, $layer->getBackground(), null);
+
+        $src = $layer->getResolvedSrc();
+        if ($src !== null) {
+            $this->paintFitBlits($layer, $src, $x, $y, fn (
+                string $src,
+                int $sx,
+                int $sy,
+                int $sw,
+                int $sh,
+                int $dx,
+                int $dy,
+                int $dw,
+                int $dh
+            ) => $this->drawImageMasked($src, $sx, $sy, $sw, $sh, $dx, $dy, $dw, $dh, $circleX, $circleY, $side, $side));
+        }
+
+        $stroke = $layer->getCircleStroke();
+        if ($stroke !== null) {
+            $this->drawEllipse($circleX, $circleY, $side, $side, null, $stroke);
+        }
+    }
+
+    /**
+     * 全 fit 白名单分派（cover/fill/contain/tile + 内在尺寸退化），blit 落点由
+     * 调用臂注入（矩形路径 drawImage / 圆形路径 drawImageMasked）——
+     * 两形态共用同一份分派几何防数学漂移（先绘后裁，fit 与 clip 正交）
+     *
+     * @param \Closure(string, int, int, int, int, int, int, int, int): void $blit
+     */
+    private function paintFitBlits(ImageLayer $layer, string $src, int $x, int $y, \Closure $blit): void
+    {
         // cover/fill 共用目标矩形（同门）：getImageOrigin + 内容宽高
         [$originX, $originY] = $layer->getImageOrigin();
         $dstX = $x + $originX;
@@ -193,7 +270,7 @@ abstract class AbstractRenderer implements RendererInterface
         $size = $this->intrinsicSize($src);
         if ($size === null) {
             // 内在尺寸不可用：整图拉伸进目标矩形（fill 形态），srcRect 零哨兵由后端取归正位图整幅
-            $this->drawImage($src, 0, 0, 0, 0, $dstX, $dstY, $dstWidth, $dstHeight);
+            $blit($src, 0, 0, 0, 0, $dstX, $dstY, $dstWidth, $dstHeight);
 
             return;
         }
@@ -203,7 +280,7 @@ abstract class AbstractRenderer implements RendererInterface
         if ($fit === ImageLayer::FIT_CONTAIN) {
             // contain（ADR 0023）：按内在比例收缩目标矩形再整图 blit
             [$cx, $cy, $cw, $ch] = $layer->getContainRect($imgWidth, $imgHeight);
-            $this->drawImage($src, 0, 0, $imgWidth, $imgHeight, $x + $cx, $y + $cy, $cw, $ch);
+            $blit($src, 0, 0, $imgWidth, $imgHeight, $x + $cx, $y + $cy, $cw, $ch);
 
             return;
         }
@@ -213,7 +290,7 @@ abstract class AbstractRenderer implements RendererInterface
             foreach ($layer->getTileRects($imgWidth, $imgHeight) as $block) {
                 [$sx, $sy, $sw, $sh] = $block['src'];
                 [$dx, $dy, $dw, $dh] = $block['dst'];
-                $this->drawImage($src, $sx, $sy, $sw, $sh, $x + $dx, $y + $dy, $dw, $dh);
+                $blit($src, $sx, $sy, $sw, $sh, $x + $dx, $y + $dy, $dw, $dh);
             }
 
             return;
@@ -221,14 +298,14 @@ abstract class AbstractRenderer implements RendererInterface
 
         if ($fit === ImageLayer::FIT_FILL) {
             // fill：整图进与 cover 相同的目标矩形（非等比拉伸，不裁切不留空隙）
-            $this->drawImage($src, 0, 0, $imgWidth, $imgHeight, $dstX, $dstY, $dstWidth, $dstHeight);
+            $blit($src, 0, 0, $imgWidth, $imgHeight, $dstX, $dstY, $dstWidth, $dstHeight);
 
             return;
         }
 
         // cover（缺省/显式 cover 归一/未知值白名单外降级）：等比居中裁窗
         [$sx, $sy, $sw, $sh] = $layer->getCoverRect($imgWidth, $imgHeight);
-        $this->drawImage($src, $sx, $sy, $sw, $sh, $dstX, $dstY, $dstWidth, $dstHeight);
+        $blit($src, $sx, $sy, $sw, $sh, $dstX, $dstY, $dstWidth, $dstHeight);
     }
 
     /**

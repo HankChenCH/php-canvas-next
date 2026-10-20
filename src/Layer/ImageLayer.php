@@ -26,6 +26,14 @@ class ImageLayer extends AbstractLayer
 
     public const FIT_TILE = 'tile';
 
+    /**
+     * 裁剪形状（ADR 0026）：两档——矩形（rect，缺省不裁）与圆形（circle，内切圆）。
+     * 圆形档是完整圆形框：背景色填充进圆、内容按 fit 绘出后遮罩进圆、边框沿圆周描成环
+     */
+    public const CLIP_RECT = 'rect';
+
+    public const CLIP_CIRCLE = 'circle';
+
     protected string $name = self::TYPE;
 
     private ?string $rawImg = null;
@@ -44,6 +52,12 @@ class ImageLayer extends AbstractLayer
      * null = cover 缺省；已知值 cover/contain/fill/tile，未知值宽容保存（渲染面按 cover 降级）
      */
     private ?string $fit = null;
+
+    /**
+     * 裁剪形状声明（ADR 0026）：静态声明不参与数据表达式，只影响绘制、不影响盒子布局；
+     * null = rect 缺省；已知值 rect/circle，未知值宽容保存（渲染面按矩形降级）
+     */
+    private ?string $clip = null;
 
     // 取值：left,center,right
     protected string $horizontalAlign = 'center';
@@ -114,6 +128,71 @@ class ImageLayer extends AbstractLayer
     public function getFit(): ?string
     {
         return $this->fit;
+    }
+
+    /**
+     * 声明裁剪形状（ADR 0026）：与 src/fit 正交（改图/打标/适配声明均不扰动）；
+     * rect 显式赋值归一为 null 缺省态，保条件写键字节面（fit 显式 cover 归一先例）
+     */
+    public function setClip(?string $clip): static
+    {
+        $this->clip = $clip === self::CLIP_RECT ? null : $clip;
+
+        return $this;
+    }
+
+    /** 裁剪形状声明原文；null = rect 缺省（渲染面未知值按矩形降级，白名单在渲染臂） */
+    public function getClip(): ?string
+    {
+        return $this->clip;
+    }
+
+    /**
+     * 内切圆矩形（ADR 0026）：边长 = min(内容区宽高)，按盒内对齐定位
+     * （alignedX/alignedY 同门公式——center 取整盒中点、left/top 贴 padding 原点侧），
+     * 内边距即框外留白；非方盒恒正方几何（渲染面即正圆），不变形为椭圆。
+     * 纯布局计算，与 getContainRect/getQrOrigin 同门；边长 ≤0（内容区被
+     * padding 吃满）由绘制臂防护不画
+     *
+     * @return array{0: int, 1: int, 2: int, 3: int} [x, y, side, side]（相对图层盒原点，宽恒等于高）
+     */
+    public function getInscribedCircleRect(): array
+    {
+        $side = min($this->getContentWidth(), $this->getContentHeight());
+
+        return [
+            intval($this->alignedX($side)),
+            intval($this->alignedY($side)),
+            $side,
+            $side,
+        ];
+    }
+
+    /**
+     * 圆周描边参数解析（ADR 0026）：宽取四边已声明宽的最小值、颜色按
+     * top→right→bottom→left 取首个非空边色、四边全未声明不描边
+     * （规则明文在根 CONTEXT.md「裁剪形状（clip shape）」词条）。
+     * 纯函数，输入输出都是边框边目的同款形态
+     *
+     * @return array{width: int, color: string}|null
+     */
+    public function getCircleStroke(): ?array
+    {
+        $declared = array_values(array_filter([
+            $this->border['top'],
+            $this->border['right'],
+            $this->border['bottom'],
+            $this->border['left'],
+        ]));
+
+        if ($declared === []) {
+            return null;
+        }
+
+        $width = min(array_map(fn (array $side): int => $side['width'], $declared));
+        $color = $declared[0]['color'];
+
+        return ['width' => $width, 'color' => $color];
     }
 
     /**
@@ -271,6 +350,12 @@ class ImageLayer extends AbstractLayer
             $graph['spec']['fit'] = $this->fit;
         }
 
+        // 裁剪形状条件写键（ADR 0026）：缺省(rect)整键不落、殿后 spec 末位 fit 之后
+        // （键序 shape/align/position/fit/clip）；未知值原样透传保往返恒等
+        if ($this->clip !== null) {
+            $graph['spec']['clip'] = $this->clip;
+        }
+
         return $graph;
     }
 
@@ -282,6 +367,11 @@ class ImageLayer extends AbstractLayer
         // 非字符串值同样归缺省（宽容读不告警）
         if (isset($graph['spec']['fit']) && is_string($graph['spec']['fit'])) {
             $layer->setFit($graph['spec']['fit']);
+        }
+
+        // 裁剪形状宽容读（ADR 0026）：无键回填缺省、显式 rect 归一、非字符串静默归缺省（fit 同门）
+        if (isset($graph['spec']['clip']) && is_string($graph['spec']['clip'])) {
+            $layer->setClip($graph['spec']['clip']);
         }
 
         $data = $graph['data'] ?? [];

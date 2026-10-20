@@ -2,6 +2,14 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.1.0 - 2026-10-20
+
+- 图片层裁剪形状圆形档（ADR 0026，spec 见 `.scratch/image-clip-shape/spec.md`）：`ImageLayer` 新增静态裁剪声明 `clip`（`CLIP_RECT`/`CLIP_CIRCLE` 常量，`setClip()`/`getClip()`，与 src/fit 正交），v1 两档——矩形（缺省不裁）与圆形（完整圆形框：背景色填进内切圆、内容按 fit 绘出后遮罩进圆、边框沿圆周描成环）
+- wire 条件写键：`spec.clip` 值=rect（缺省）整键不落、落键殿后 spec 末位 fit 之后（键序钉死 shape/align/position/fit/clip）；解码宽容读——无键回填 rect、显式 rect 归一缺省态（fit 显式 cover 归一先例）、非字符串静默归缺省、未知值原样透传保往返恒等；无 clip 存量 graph 字节面零变化
+- 纯布局函数：`getInscribedCircleRect()` 内切圆矩形——边长 = min(内容区宽高)、alignedX/alignedY 同门盒内对齐定位、padding 即框外留白、非方盒恒正方几何（渲染面正圆）不变形为椭圆；`getCircleStroke()` 圆周描边参数解析——宽取四边已声明宽的最小值、色按 top→right→bottom→left 取首个非空边色、四边全未声明不描边
+- 分派层圆形档：`AbstractRenderer` 以 instanceof 探测新增形状能力口 `Contracts\ShapeCapableRenderer`（后端可选实现——`drawEllipse(rect, fill, stroke)` 椭圆绘制与 `drawImageMasked(..., maskRect)` 掩码 blit 双原语，掩码 = 内切于给定矩形的椭圆、分派层传正方形即圆，原语零形状语义零 fit 语义，ADR 0024 方向延续）；clip=circle 且后端实现能力口走三步（背景填进内切圆 → fit 先绘后遮罩 blit → 圆周描边环），fit 分派几何收敛 `paintFitBlits` 单处与矩形路径共用防数学漂移；未知 clip 值与后端缺能力口降级矩形；内在尺寸不可用退化 fill 形态再裁圆（ADR 0024 纪律）
+- 测试：clip wire 四腿、内切圆/描边解析矩阵（纯几何单测）、圆形档分派几何断言（CoordinateRecordingRenderer 扩展椭圆/掩码 blit 留痕）、缺能力口与未知值降级、内在尺寸退化；存量序列化/分派断言按设计保绿
+
 ## 2.0.2 - 2026-10-19
 
 - `ImageLayer::getTileRects` 非法内在尺寸（≤0）防线返回空集：≤0 步长使平铺循环不终止，公开 API 对第三方直调自防御（Go TileRects 同款防御；分派层 intrinsicSize 已门控，渲染行为面零变化）+ 防线用例（retro 08 票）
