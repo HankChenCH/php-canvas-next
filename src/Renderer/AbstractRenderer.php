@@ -25,7 +25,8 @@ use InvalidArgumentException;
  * 失败即抛、渲染面丢弃、无产物逃逸（begin 已开的渲染面随异常丢弃）
  *
  * 渲染期控制面（ADR 0008）：$ctx 以显式首参随调用向下穿线（paint* 与 Go 同位），
- * 检查点轮询 throwIfRequested()——根层循环每图层前、paintTable 行循环每行前
+ * 检查点轮询 throwIfRequested()——根层循环每图层前、paintTable 行循环每行前；
+ * 多页 walk 模板 renderPages 另设页间检查点一处（i > 0、下一页 begin 前，工票 01）
  */
 abstract class AbstractRenderer implements RendererInterface
 {
@@ -37,9 +38,68 @@ abstract class AbstractRenderer implements RendererInterface
      * 渲染整棵结构树
      *
      * 根层渲染循环跳过 visible=false（layer-panel-ux 工单 01 隐藏语义 = 最终输出排除）：
-     * 跳过在绘制分派之前，隐藏层的惰性物化不会发生；容器子层不下钻显隐（显隐面仅根图层）
+     * 跳过在绘制分派之前，隐藏层的惰性物化不会发生；容器子层不下钻显隐（显隐面仅根图层）。
+     * 页内段（建面 → 背景铺装 → 逐层 paint）抽取为 paintPage 与多页 renderPages 共享
+     * （工票 01）——本方法 = paintPage + end 两段式，调用序与抽取前逐项一致
      */
     final public function render(Cancellation $ctx, Canvas $canvas): mixed
+    {
+        $this->paintPage($ctx, $canvas);
+
+        return $this->end();
+    }
+
+    /**
+     * 多页 walk 模板（工票 01，镜像 go renderer.RenderPages 定稿语义）：消费已分页
+     * 页序列（DocumentCompiler::compile(...)->canvases 同构形态，帧序×页序扁平），
+     * 逐页复用页内段 paintPage（begin → 背景铺装 → 逐层 paint），全部页完成后统一
+     * end() 一次（n 页 = n 次 begin + 1 次 end）。背景逐页显式携带（ADR 0022 分页页
+     * 产物自带 background）；visible 逐页过滤（与单页 render 同语义，隐藏层不触达
+     * 任何原语与物化）。
+     * ctx 检查点：页间一处新增（i > 0 时、下一页 begin 前）——首页前不另设（与单页
+     * render 同构）；页内既有检查点（根层每图层前/表行每行前/物化入口）不动，逐页生效。
+     * 失败语义：任一页任一原语/物化失败即抛、end 不达、整文档无产物逃逸（无半成品）。
+     * 空页序列属调用侧用法错误：普通异常不设 code（「0 begin + 1 end」的空文档语义
+     * 不由模板代答，调用方 CompileResult::canvases 恒非空）
+     *
+     * @param list<Canvas> $pages 已分页页序列（帧序×页序）
+     */
+    final public function renderPages(Cancellation $ctx, array $pages): mixed
+    {
+        if ($pages === []) {
+            throw new InvalidArgumentException('renderPages: 页序列为空，至少需要一页');
+        }
+        foreach ($pages as $page) {
+            if (!$page instanceof Canvas) {
+                // 元素类型守卫与空序列守卫同面：调用侧用法错误，普通异常不设 code
+                // （防线对称：PHP 数组无 go []*canvas.Canvas 的编译期类型面）
+                throw new InvalidArgumentException(
+                    'renderPages: 页序列元素须为 ' . Canvas::class . '，得到 ' . get_debug_type($page)
+                );
+            }
+        }
+
+        $i = 0;
+        foreach ($pages as $page) {
+            if ($i > 0) {
+                // 页间检查点（本模板唯一新增）：先于下一页的建面与背景物化掐断已取消/到期的 ctx
+                $ctx->throwIfRequested();
+            }
+            $this->paintPage($ctx, $page);
+            $i++;
+        }
+
+        return $this->end();
+    }
+
+    /**
+     * 页内段（单页编排）：建面 → 背景铺装 → 根层逐层 paint（不含 end 收尾）。
+     * 单页 render() 与多页 renderPages() 共享的页内编排——多页是本段的页循环外扩；
+     * 原样抽取自 render()（工票 01 零行为变化红线：调用序与抽取前逐项一致）。
+     * 根层循环跳过 visible=false（layer-panel-ux 工单 01 隐藏语义 = 最终输出排除）：
+     * 跳过在绘制分派之前，隐藏层的惰性物化不会发生；容器子层不下钻显隐（显隐面仅根图层）
+     */
+    private function paintPage(Cancellation $ctx, Canvas $canvas): void
     {
         $this->begin($canvas->getWidth(), $canvas->getHeight());
         $this->paintBackground($ctx, $canvas);
@@ -51,8 +111,6 @@ abstract class AbstractRenderer implements RendererInterface
             }
             $this->paint($ctx, $layer, 0, 0, $canvas->getWidth(), $canvas->getHeight());
         }
-
-        return $this->end();
     }
 
     /**

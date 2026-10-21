@@ -15,6 +15,9 @@ class RecordingTestRenderer extends AbstractRenderer
     /** @var string[] 调用序记录：begin/rect/image/text/end */
     public array $records = [];
 
+    /** @var list<array{0: int, 1: int}> 每次 begin 的建面尺寸留痕（多页逐页建面断言用） */
+    public array $begins = [];
+
     /** 每次 drawRect 后回调（供测试在绘制中途武装取消信号） */
     public ?\Closure $afterRect = null;
 
@@ -26,6 +29,7 @@ class RecordingTestRenderer extends AbstractRenderer
     protected function begin(int $width, int $height): void
     {
         $this->records[] = 'begin';
+        $this->begins[] = [$width, $height];
     }
 
     protected function end(): string
