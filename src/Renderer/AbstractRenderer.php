@@ -69,6 +69,15 @@ abstract class AbstractRenderer implements RendererInterface
         if ($pages === []) {
             throw new InvalidArgumentException('renderPages: 页序列为空，至少需要一页');
         }
+        foreach ($pages as $page) {
+            if (!$page instanceof Canvas) {
+                // 元素类型守卫与空序列守卫同面：调用侧用法错误，普通异常不设 code
+                // （防线对称：PHP 数组无 go []*canvas.Canvas 的编译期类型面）
+                throw new InvalidArgumentException(
+                    'renderPages: 页序列元素须为 ' . Canvas::class . '，得到 ' . get_debug_type($page)
+                );
+            }
+        }
 
         $i = 0;
         foreach ($pages as $page) {

@@ -216,6 +216,24 @@ class RendererMultipageTest extends CanvasTestCase
         $this->assertSame([], $renderer->records, '空页序列不应触达任何原语');
     }
 
+    public function testNonCanvasPageElementIsUsageErrorWithoutCode(): void
+    {
+        // 元素类型守卫与空序列守卫同面：异类元素属调用侧用法错误，普通异常不设
+        // code、零原语触达（防线对称：PHP 数组无 go []*canvas.Canvas 的编译期类型面，
+        // 非法输入防线随期望值矩阵平移——否则异类在 paintPage 深处才 TypeError）
+        $renderer = new RecordingTestRenderer();
+
+        try {
+            $renderer->renderPages(new NullCancellation(), [Canvas::make(10, 10), 'not-a-canvas']);
+            $this->fail('非 Canvas 元素必须报错');
+        } catch (InvalidArgumentException $e) {
+            $this->assertNotInstanceOf(CanvasNextExceptionInterface::class, $e, '用法错误不落绘制期错误分类面（不设 code）');
+            $this->assertStringContainsString('string', $e->getMessage(), '错误应点名实际元素类型');
+        }
+
+        $this->assertSame([], $renderer->records, '元素守卫不应触达任何原语');
+    }
+
     public function testPageFailureDropsWholeDocumentWithoutEnd(): void
     {
         // 第 2 页首笔绘制失败：异常即抛、end 不达、第 1 页已画内容与整文档产物一并作废
