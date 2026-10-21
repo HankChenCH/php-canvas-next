@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.2.0 - 2026-10-21
+
+- `AbstractRenderer` 新增多页 walk 模板 `renderPages(Cancellation $ctx, array $pages): mixed`（final 模板方法，不进 `RendererInterface`；pdf-renderer effort 工票 01，承接并取代 canvas-compiler 工票 07，语义逐条平移 go `renderer.RenderPages` 定稿）：空页序列/非 Canvas 元素守卫（调用侧用法错误，普通异常不设 code）、页间 ctx 检查点一处（`i > 0` 时、下一页 begin 前，首页前不另设）、visible 逐页过滤、背景逐页显式携带（ADR 0022）、n 页 = n 次 begin + 1 次 end、任一页失败 end 不达整文档无产物逃逸
+- 单页 `render()` 页内段原样抽取为 private `paintPage` 两段式共享（单页零行为变化红线，存量测试保绿；wire 字节面不动，无 layout-snapshot 重导）
+- 测试：`RendererMultipageTest` 9 用例（三页调用序 begin×3+end×1、页间检查点落点双向钉位、visible 过滤、背景逐页、空序列与元素守卫、第 k 页失败零产物 end 不达、页内 walk 与单页逐项同构比对）
+
 ## 2.1.0 - 2026-10-20
 
 - 图片层裁剪形状圆形档（ADR 0026，spec 见 `.scratch/image-clip-shape/spec.md`）：`ImageLayer` 新增静态裁剪声明 `clip`（`CLIP_RECT`/`CLIP_CIRCLE` 常量，`setClip()`/`getClip()`，与 src/fit 正交），v1 两档——矩形（缺省不裁）与圆形（完整圆形框：背景色填进内切圆、内容按 fit 绘出后遮罩进圆、边框沿圆周描成环）
