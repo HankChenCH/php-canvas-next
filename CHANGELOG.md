@@ -2,6 +2,14 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.3.0 - 2026-10-22
+
+- 模板表逐行拆分分页模式（提案 003，paginate-semantics v2.0 转正 + v2.1 勘误；row-split-pagination effort）：`CanvasPaginator` 构造第三参 `split`（`fromOptions` 读取 `options.split`）——枚举闭集 v1 仅 `"lines"`，键在而值 ∉ 闭集 = `paginate_option_invalid` 构造期 fail-fast（与分页开关正交恒执行，新异常 code 已入 `CorpusDocument::EXCEPTION_BY_CODE`）；未知键仍忽略，开键面纪律不变
+- 拆分语义：可拆行（全文本格且内容行数 ≥ 2）在页界即拆，拆分界 K = min(floor(剩余空间/L), M_max−1) ≥ 1 时前段入当前页、封页，续段等价新行重入装箱（可再拆，片段内容行数严格递减 → 必然收敛），行退为最终原子；装箱循环改决策表四支（装入/拆分/truncate/整行下页，每行恰走一支），拆分分支先于 truncate/overflow 判定——truncate 同步收窄为仅对不可拆行生效；省略 `split` 的原子模式行为零变化，truncate 语义不变
+- 新增 `src/Compiler/RowSplitter.php`：`lineStats`/`splitBound`/`splitRowGraph` 三件套纯函数（零 I/O 零渲染依赖；格独立分片、按 `\n` 硬断行切片、P<0 / 续段≤0 / L≤0 防线，与 go-canvas `paginate/rowsplit.go` 成对平移）
+- 语料消费：runner 契约切 paginate-semantics v2.1（20 例全量消费），submodule pin 移动 canvas-semantics `3d8ed35`（提案 003 转正 + 混合格期望值勘误 meta.errata），`support-surface.json` 重签 v2.1
+- 测试：`RowSplitterTest` 12 例（K=0 整行下移 / 单体格不可拆 / 三道防线 / K·L 恰满 / 键形克隆 / 收敛结构断言）+ `CanvasPaginatorTest` 构造期守卫与分页关 `split` 无效补锁；渲染后端（image-renderer）/flow 链/js-canvas/canvas-web/example 零改动
+
 ## 2.2.0 - 2026-10-21
 
 - `AbstractRenderer` 新增多页 walk 模板 `renderPages(Cancellation $ctx, array $pages): mixed`（final 模板方法，不进 `RendererInterface`；pdf-renderer effort 工票 01，承接并取代 canvas-compiler 工票 07，语义逐条平移 go `renderer.RenderPages` 定稿）：空页序列/非 Canvas 元素守卫（调用侧用法错误，普通异常不设 code）、页间 ctx 检查点一处（`i > 0` 时、下一页 begin 前，首页前不另设）、visible 逐页过滤、背景逐页显式携带（ADR 0022）、n 页 = n 次 begin + 1 次 end、任一页失败 end 不达整文档无产物逃逸
