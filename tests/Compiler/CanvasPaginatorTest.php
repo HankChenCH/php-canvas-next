@@ -103,6 +103,44 @@ class CanvasPaginatorTest extends CanvasTestCase
         }
     }
 
+    public function testSplitOptionInvalidThrowsAtConstruction(): void
+    {
+        // 构造期枚举守卫（提案 003，paginate_option_invalid）：语料只钉字符串 "rows" 一例；
+        // 本文件补锁非字符串值与大小写敏感（枚举闭集 v1 仅小写 "lines"），守卫不分页开关
+        foreach (['rows', '', 'Lines', 'lines ', 123, false, []] as $badSplit) {
+            try {
+                new CanvasPaginator(split: $badSplit);
+                $this->fail("split " . var_export($badSplit, true) . ' 必须抛 paginate_option_invalid');
+            } catch (PaginateException $e) {
+                $this->assertSame('paginate_option_invalid', $e->getErrorCode());
+            }
+
+            try {
+                CanvasPaginator::fromOptions(['split' => $badSplit]);
+                $this->fail("fromOptions split " . var_export($badSplit, true) . ' 必须抛 paginate_option_invalid');
+            } catch (PaginateException $e) {
+                $this->assertSame('paginate_option_invalid', $e->getErrorCode());
+            }
+        }
+
+        // 合法值：缺省（null）与 "lines" 均通过构造
+        new CanvasPaginator();
+        new CanvasPaginator(split: 'lines');
+        CanvasPaginator::fromOptions(['split' => 'lines']);
+        $this->assertInstanceOf(CanvasPaginator::class, CanvasPaginator::fromOptions([]));
+    }
+
+    public function testSplitOptionIgnoredWhenPaginationOff(): void
+    {
+        // 分页关时 split 键不改变行为（直通 + 溢出判定，与原子模式同果）：
+        // 语料 split-lines-key-ineffective-when-pagination-off 的对象级同构补锁
+        $canvas = Canvas::make(320, 450, $this->standardTable());
+
+        $pages = (new CanvasPaginator(split: 'lines'))->paginate($canvas);
+
+        $this->assertSame([$canvas], $pages);
+    }
+
     public function testNestedTablesDoNotDrivePagination(): void
     {
         // 嵌套表（表中之表）不驱动分页：外层表是唯一顶层驱动表（其行含内层表整行装箱），
