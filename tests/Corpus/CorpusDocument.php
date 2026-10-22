@@ -46,6 +46,7 @@ final class CorpusDocument
         'content_overflow' => PaginateException::class,
         'paginate_target_invalid' => PaginateException::class,
         'page_geometry_invalid' => PaginateException::class,
+        'paginate_option_invalid' => PaginateException::class,
     ];
 
     public static function root(): string

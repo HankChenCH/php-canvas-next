@@ -24,8 +24,9 @@ abstract class CanvasCompiler
 
     /**
      * 分页选项（spec §4.2 钉稿，键义见 CanvasPaginator::fromOptions）：
-     * pageHeight（正整数像素；缺省 = 未启用分页）与 truncate（bool，默认 false）。
-     * 载体维持数组（CompileContext.options 封闭通道）；CanvasPaginator 即页几何/截断的类型化承载
+     * pageHeight（正整数像素；缺省 = 未启用分页）、truncate（bool，默认 false）与
+     * split（"lines" = 逐行拆分模式，提案 003；缺省 = 原子模式）。
+     * 载体维持数组（CompileContext.options 封闭通道）；CanvasPaginator 即页几何/截断/拆分的类型化承载
      */
     protected readonly array $paginateOptions;
 

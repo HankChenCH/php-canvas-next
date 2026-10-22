@@ -9,7 +9,9 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
 
 /**
  * 分页契约 runner（工票 06 消费翻转）：语义 = submodule 语料
- * corpus/paginate-semantics/v1.0/paginate.json，共 12 用例。
+ * corpus/paginate-semantics/v2.1/paginate.json，共 20 用例
+ * （v2.1 = v2.0 的勘误版：混合格用例期望内容层宽随重建管线归一，meta.errata；
+ *   拆分 8 例自 v2.0 = 提案 003 收编承入）。
  *
  * 管线 = graph → Canvas::fromGraph → CanvasPaginator::fromOptions(options) → paginate()，
  * 输入为 hydrate 产物（无诊断发射面，expect 不收 warnings），
@@ -18,8 +20,8 @@ use HankChen\CanvasNext\Tests\Support\CanvasTestCase;
  */
 class PaginateCorpusTest extends CanvasTestCase
 {
-    public const CONTRACT = 'paginate-semantics v1.0';
-    private const MODULE_FILE = 'paginate-semantics/v1.0/paginate.json';
+    public const CONTRACT = 'paginate-semantics v2.1';
+    private const MODULE_FILE = 'paginate-semantics/v2.1/paginate.json';
 
     public static function paginateCasesProvider(): iterable
     {
